@@ -1,0 +1,149 @@
+/*!*@import './base.css';*!*/
+
+/*!*#app {*!*/
+/*!*  max-width: 1280px;*!*/
+/*!*  margin: 0 auto;*!*/
+/*!*  padding: 2rem;*!*/
+/*!*  font-weight: normal;*!*/
+/*!*}*!*/
+
+/*!*a,*!*/
+/*!*.green {*!*/
+/*!*  text-decoration: none;*!*/
+/*!*  color: hsla(160, 100%, 37%, 1);*!*/
+/*!*  transition: 0.4s;*!*/
+/*!*  padding: 3px;*!*/
+/*!*}*!*/
+
+/*!*@media (hover: hover) {*!*/
+/*!*  a:hover {*!*/
+/*!*    background-color: hsla(160, 100%, 37%, 0.2);*!*/
+/*!*  }*!*/
+/*!*}*!*/
+
+/*!*@media (min-width: 1024px) {*!*/
+/*!*  body {*!*/
+/*!*    display: flex;*!*/
+/*!*    place-items: center;*!*/
+/*!*  }*!*/
+/*!*}*!*/
+
+/*!* src/assets/main.css *!*/
+@import './base.css';
+
+/* 自定义全局样式 */
+body {
+  font-family: 'Arial', sans-serif;
+  background-color: #f0f2f5;
+  color: #303133;
+}
+
+#app {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  font-weight: normal;
+}
+
+a,
+.green {
+  text-decoration: none;
+  color: hsla(160, 100%, 37%, 1);
+  transition: 0.4s;
+  padding: 3px;
+}
+
+@media (hover: hover) {
+  a:hover {
+    background-color: hsla(160, 100%, 37%, 0.2);
+  }
+}
+
+@media (min-width: 1024px) {
+  body {
+    display: flex;
+    place-items: center;
+  }
+}
+
+/* 自定义统计页面样式 */
+.statistics-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  transition: transform 0.3s;
+}
+
+.stat-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.stat-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  margin-right: 20px;
+}
+
+.stat-info {
+  flex: 1;
+}
+
+.stat-title {
+  font-size: 18px;
+  color: #909399;
+  margin-bottom: 10px;
+}
+
+.stat-number {
+  font-size: 36px;
+  font-weight: bold;
+  color: #303133;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chart-container {
+  height: 400px;
+  margin-top: 20px;
+}
+
+/* 自定义图标样式 */
+.stat-icon-circle-check {
+  background: #67c23a;
+}
+
+.stat-icon-warning {
+  background: #f56c6c;
+}
+
+.stat-icon-trend-charts {
+  background: #409eff;
+}
+
+/* 过渡效果 */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.5s;
+}
+
+.fade-enter, .fade-leave-to {
+  opacity: 0;
+}

@@ -1,0 +1,395 @@
+<!--<template>-->
+<!--  <div class="statistics-container">-->
+<!--    <el-row :gutter="20">-->
+<!--      <el-col :span="8">-->
+<!--        <el-card class="stat-card">-->
+<!--          <div class="stat-icon" style="background: #67c23a;">-->
+<!--            <el-icon size="40"><CircleCheck /></el-icon>-->
+<!--          </div>-->
+<!--          <div class="stat-info">-->
+<!--            <div class="stat-title">清醒次数</div>-->
+<!--            <div class="stat-number">{{ stats.alertCount || 0 }}</div>-->
+<!--          </div>-->
+<!--        </el-card>-->
+<!--      </el-col>-->
+
+<!--      <el-col :span="8">-->
+<!--        <el-card class="stat-card">-->
+<!--          <div class="stat-icon" style="background: #f56c6c;">-->
+<!--            <el-icon size="40"><Warning /></el-icon>-->
+<!--          </div>-->
+<!--          <div class="stat-info">-->
+<!--            <div class="stat-title">疲劳次数</div>-->
+<!--            <div class="stat-number">{{ stats.drowsyCount || 0 }}</div>-->
+<!--          </div>-->
+<!--        </el-card>-->
+<!--      </el-col>-->
+
+<!--      <el-col :span="8">-->
+<!--        <el-card class="stat-card">-->
+<!--          <div class="stat-icon" style="background: #409eff;">-->
+<!--            <el-icon size="40"><TrendCharts /></el-icon>-->
+<!--          </div>-->
+<!--          <div class="stat-info">-->
+<!--            <div class="stat-title">疲劳率</div>-->
+<!--            <div class="stat-number">{{ stats.drowsyRate || '0%' }}</div>-->
+<!--          </div>-->
+<!--        </el-card>-->
+<!--      </el-col>-->
+<!--    </el-row>-->
+
+<!--    <el-card style="margin-top: 20px;">-->
+<!--      <template #header>-->
+<!--        <div class="card-header">-->
+<!--          <span>检测趋势（最近7天）</span>-->
+<!--          <el-radio-group v-model="days" @change="loadStats">-->
+<!--            <el-radio-button :label="7">7天</el-radio-button>-->
+<!--            <el-radio-button :label="30">30天</el-radio-button>-->
+<!--          </el-radio-group>-->
+<!--        </div>-->
+<!--      </template>-->
+
+<!--      <div ref="chartRef" class="chart-container"></div>-->
+<!--    </el-card>-->
+<!--  </div>-->
+<!--</template>-->
+
+<!--<script setup>-->
+<!--import { ref, onMounted, nextTick } from 'vue'-->
+<!--import * as echarts from 'echarts'-->
+<!--import { CircleCheck, Warning, TrendCharts } from '@element-plus/icons-vue'-->
+<!--import { getStatistics } from '@/api'-->
+
+<!--const stats = ref({})-->
+<!--const days = ref(7)-->
+<!--const chartRef = ref(null)-->
+<!--let chart = null-->
+
+<!--const loadStats = async () => {-->
+<!--  try {-->
+<!--    const res = await getStatistics('user001', days.value)-->
+<!--    if (res.data.code === 200) {-->
+<!--      stats.value = res.data.data-->
+<!--      updateChart()-->
+<!--    }-->
+<!--  } catch (error) {-->
+<!--    console.error('加载统计失败:', error)-->
+<!--  }-->
+<!--}-->
+
+<!--const updateChart = () => {-->
+<!--  if (!chart) return-->
+
+<!--  const option = {-->
+<!--    tooltip: {-->
+<!--      trigger: 'axis'-->
+<!--    },-->
+<!--    legend: {-->
+<!--      data: ['清醒', '疲劳']-->
+<!--    },-->
+<!--    xAxis: {-->
+<!--      type: 'category',-->
+<!--      data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日']-->
+<!--    },-->
+<!--    yAxis: {-->
+<!--      type: 'value'-->
+<!--    },-->
+<!--    series: [-->
+<!--      {-->
+<!--        name: '清醒',-->
+<!--        type: 'bar',-->
+<!--        data: [120, 132, 101, 134, 90, 230, 210],-->
+<!--        itemStyle: { color: '#67c23a' }-->
+<!--      },-->
+<!--      {-->
+<!--        name: '疲劳',-->
+<!--        type: 'bar',-->
+<!--        data: [20, 12, 21, 14, 30, 40, 20],-->
+<!--        itemStyle: { color: '#f56c6c' }-->
+<!--      }-->
+<!--    ]-->
+<!--  }-->
+
+<!--  chart.setOption(option)-->
+<!--}-->
+
+<!--onMounted(async () => {-->
+<!--  await loadStats()-->
+<!--  await nextTick()-->
+<!--  if (chartRef.value) {-->
+<!--    chart = echarts.init(chartRef.value)-->
+<!--    updateChart()-->
+<!--    window.addEventListener('resize', () => chart.resize())-->
+<!--  }-->
+<!--})-->
+<!--</script>-->
+
+<!--<style scoped>-->
+<!--.statistics-container {-->
+<!--  max-width: 1200px;-->
+<!--  margin: 0 auto;-->
+<!--}-->
+
+<!--.stat-card {-->
+<!--  display: flex;-->
+<!--  align-items: center;-->
+<!--  padding: 20px;-->
+<!--}-->
+
+<!--.stat-icon {-->
+<!--  width: 80px;-->
+<!--  height: 80px;-->
+<!--  border-radius: 50%;-->
+<!--  display: flex;-->
+<!--  align-items: center;-->
+<!--  justify-content: center;-->
+<!--  color: white;-->
+<!--  margin-right: 20px;-->
+<!--}-->
+
+<!--.stat-info {-->
+<!--  flex: 1;-->
+<!--}-->
+
+<!--.stat-title {-->
+<!--  font-size: 16px;-->
+<!--  color: #909399;-->
+<!--  margin-bottom: 10px;-->
+<!--}-->
+
+<!--.stat-number {-->
+<!--  font-size: 32px;-->
+<!--  font-weight: bold;-->
+<!--  color: #303133;-->
+<!--}-->
+
+<!--.card-header {-->
+<!--  display: flex;-->
+<!--  justify-content: space-between;-->
+<!--  align-items: center;-->
+<!--}-->
+
+<!--.chart-container {-->
+<!--  height: 400px;-->
+<!--}-->
+<!--</style>-->
+<template>
+  <div class="statistics-container">
+    <el-row :gutter="20">
+      <el-col :span="8">
+        <el-card class="stat-card" shadow="hover">
+          <transition name="fade">
+            <div class="stat-icon stat-icon-circle-check">
+              <el-icon size="40"><CircleCheck /></el-icon>
+            </div>
+          </transition>
+          <div class="stat-info">
+            <div class="stat-title">清醒次数</div>
+            <div class="stat-number">{{ stats.alertCount || 0 }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card class="stat-card" shadow="hover">
+          <transition name="fade">
+            <div class="stat-icon stat-icon-warning">
+              <el-icon size="40"><Warning /></el-icon>
+            </div>
+          </transition>
+          <div class="stat-info">
+            <div class="stat-title">疲劳次数</div>
+            <div class="stat-number">{{ stats.drowsyCount || 0 }}</div>
+          </div>
+        </el-card>
+      </el-col>
+      <el-col :span="8">
+        <el-card class="stat-card" shadow="hover">
+          <transition name="fade">
+            <div class="stat-icon stat-icon-trend-charts">
+              <el-icon size="40"><TrendCharts /></el-icon>
+            </div>
+          </transition>
+          <div class="stat-info">
+            <div class="stat-title">疲劳率</div>
+            <div class="stat-number">{{ stats.drowsyRate || '0%' }}</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-card style="margin-top: 20px;" shadow="hover">
+      <template #header>
+        <div class="card-header">
+          <span>检测趋势（最近{{ days }}天）</span>
+          <el-radio-group v-model="days" @change="loadStats">
+            <el-radio-button :label="7">7天</el-radio-button>
+            <el-radio-button :label="30">30天</el-radio-button>
+          </el-radio-group>
+        </div>
+      </template>
+      <div ref="chartRef" class="chart-container"></div>
+    </el-card>
+  </div>
+</template>
+
+<script setup>
+import { ref, onMounted, nextTick } from 'vue'
+import * as echarts from 'echarts'
+import { CircleCheck, Warning, TrendCharts } from '@element-plus/icons-vue'
+import { getStatistics } from '@/api'
+
+const stats = ref({})
+const days = ref(7)
+const chartRef = ref(null)
+let chart = null
+
+const loadStats = async () => {
+  try {
+    const res = await getStatistics('user001', days.value)
+    if (res.data.code === 200) {
+      stats.value = res.data.data
+      updateChart()
+    }
+  } catch (error) {
+    console.error('加载统计失败:', error)
+  }
+}
+
+const updateChart = () => {
+  if (!chart) return
+
+  const option = {
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: {
+        type: 'shadow'
+      }
+    },
+    legend: {
+      data: ['清醒', '疲劳'],
+      top: '10%'
+    },
+    xAxis: {
+      type: 'category',
+      data: stats.value.days || ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
+      axisLabel: {
+        interval: 0,
+        rotate: 45
+      }
+    },
+    yAxis: {
+      type: 'value',
+      name: '次数',
+      nameTextStyle: {
+        color: '#303133'
+      }
+    },
+    series: [
+      {
+        name: '清醒',
+        type: 'bar',
+        stack: '总量',
+        itemStyle: { color: '#67c23a' },
+        data: stats.value.alertCountPerDay || [120, 132, 101, 134, 90, 230, 210],
+        label: {
+          show: true,
+          position: 'top',
+          color: '#303133'
+        }
+      },
+      {
+        name: '疲劳',
+        type: 'bar',
+        stack: '总量',
+        itemStyle: { color: '#f56c6c' },
+        data: stats.value.drowsyCountPerDay || [20, 12, 21, 14, 30, 40, 20],
+        label: {
+          show: true,
+          position: 'top',
+          color: '#303133'
+        }
+      }
+    ]
+  }
+
+  chart.setOption(option)
+}
+
+onMounted(async () => {
+  await loadStats()
+  await nextTick()
+  if (chartRef.value) {
+    chart = echarts.init(chartRef.value)
+    updateChart()
+    window.addEventListener('resize', () => chart.resize())
+  }
+})
+</script>
+
+<style scoped>
+@import '../assets/main.css';
+
+.statistics-container {
+  background-color: #ffffff;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.stat-card {
+  display: flex;
+  align-items: center;
+  padding: 20px;
+  transition: transform 0.3s, box-shadow 0.3s;
+  border-radius: 10px;
+  background-color: #f8f9fa;
+}
+
+.stat-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.2);
+}
+
+.stat-icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  margin-right: 20px;
+}
+
+.stat-info {
+  flex: 1;
+}
+
+.stat-title {
+  font-size: 18px;
+  color: #909399;
+  margin-bottom: 10px;
+}
+
+.stat-number {
+  font-size: 36px;
+  font-weight: bold;
+  color: #303133;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.chart-container {
+  height: 400px;
+}
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.5s;
+}
+
+.fade-enter, .fade-leave-to {
+  opacity: 0;
+}
+</style>
