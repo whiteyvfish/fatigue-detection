@@ -1,0 +1,722 @@
+"""
+YOLOv8 疲劳检测 API 服务
+替换原有 SSD，保留所有接口不变
+"""
+
+import argparse
+import base64
+import io
+import os
+import tempfile
+import time
+import traceback
+from typing import Dict, List, Tuple
+
+import cv2
+import numpy as np
+import torch
+from PIL import Image
+from flask import Flask, jsonify, request, send_file
+
+from ultralytics import YOLO
+
+app = Flask(__name__)
+
+# ==================== 配置 ====================
+# MODEL_PATH = os.environ.get("AI_SERVER_MODEL_PATH", "./weights/v8m_drowsy_detect_model.pt")
+# MODEL_PATH = os.environ.get("AI_SERVER_MODEL_PATH", "./runs/detect/runs/baseline/weights/best.pt")
+MODEL_PATH = os.environ.get("AI_SERVER_MODEL_PATH", "./weights/best_cbam_7cls.pt")
+
+HOST = os.environ.get("AI_SERVER_HOST", "0.0.0.0")
+PORT = int(os.environ.get("AI_SERVER_PORT", "5000"))
+CONF_THRESH = float(os.environ.get("AI_SERVER_CONF_THRESH", "0.4"))
+TOP_K = int(os.environ.get("AI_SERVER_TOP_K", "200"))
+NMS_THRESH = float(os.environ.get("AI_SERVER_NMS_THRESH", "0.45"))
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+YOLO_MODEL = None
+
+# 颜色定义（BGR格式，用于OpenCV）
+COLOR_MAP = {
+    "Face": (128, 128, 128),           # 灰色
+    "Leye open": (0, 255, 0),          # 绿色
+    "Leye closed": (0, 0, 255),        # 红色
+    "Reye open": (0, 255, 0),          # 绿色
+    "Reye closed": (0, 0, 255),        # 红色
+    "Mouth": (0, 165, 255),            # 橙色
+}
+DEFAULT_COLOR = (128, 128, 128)
+
+
+# ==================== YOLOv8 初始化 ====================
+
+def init_runtime(weight_path: str) -> None:
+    """初始化 YOLOv8 模型"""
+    global YOLO_MODEL
+    if not os.path.exists(weight_path):
+        raise FileNotFoundError(f"model file not found: {weight_path}")
+
+    print(f"Loading YOLOv8 model: {weight_path}")
+    YOLO_MODEL = YOLO(weight_path)
+    YOLO_MODEL.to(DEVICE)
+    print(f"YOLOv8 model loaded on {DEVICE}")
+
+
+def run_inference(pil_img: Image.Image, conf_thresh: float = None) -> Dict:
+    """YOLOv8 单帧推理"""
+    if YOLO_MODEL is None:
+        raise RuntimeError("model not initialized")
+
+    thresh = conf_thresh if conf_thresh is not None else CONF_THRESH
+
+    # PIL -> numpy array (RGB)
+    img_np = np.array(pil_img.convert("RGB"))
+
+    # YOLOv8 推理
+    results = YOLO_MODEL(img_np, conf=thresh, verbose=False)
+    result = results[0]
+
+    # 解析检测框
+    det_list: List[Dict] = []
+    boxes = result.boxes
+    if boxes is not None:
+        cls_ids = boxes.cls.cpu().numpy().astype(int)
+        confs = boxes.conf.cpu().numpy()
+        xyxys = boxes.xyxy.cpu().numpy().astype(int)
+
+        for i in range(len(cls_ids)):
+            det_list.append({
+                "label": result.names[int(cls_ids[i])],
+                "score": float(confs[i]),
+                "bbox": [int(xyxys[i][0]), int(xyxys[i][1]),
+                        int(xyxys[i][2]), int(xyxys[i][3])]
+            })
+
+    det_list.sort(key=lambda item: item["score"], reverse=True)
+    return {
+        "success": True,
+        "device": DEVICE.type,
+        "count": len(det_list),
+        "detections": det_list,
+    }
+
+
+# ==================== 单图疲劳判断（无状态，仅依赖当前帧检测结果） ====================
+
+def judge_fatigue_from_image(detections: List[Dict]) -> Dict:
+    """根据单张图片的检测结果直接判断疲劳状态，不依赖历史帧"""
+    eye_open = True
+    mouth_open = False
+    face_box = None
+    mouth_box = None
+
+    for det in detections:
+        label = det["label"]
+        bbox = det["bbox"]
+        if label == "Face":
+            face_box = bbox
+        elif label in ["Leye closed", "Reye closed"]:
+            eye_open = False
+        elif label == "Mouth":
+            mouth_box = bbox
+            mouth_open = True
+
+    is_fatigue = False
+    reason = "AWAKE"
+
+    # 判断1：眼睛闭合 → 疲劳
+    if not eye_open:
+        is_fatigue = True
+        reason = "EYE_CLOSED"
+
+    # 判断2：打哈欠（嘴巴张开比例 > 0.3）
+    if not is_fatigue and mouth_box and face_box:
+        face_h = face_box[3] - face_box[1]
+        mouth_h = mouth_box[3] - mouth_box[1]
+        if face_h > 0 and (mouth_h / face_h) > 0.3:
+            is_fatigue = True
+            reason = "YAWNING"
+
+    # 判断3：没有检测到人脸 → 分心/姿态异常
+    if not is_fatigue and face_box is None:
+        is_fatigue = True
+        reason = "FACE_MISSING"
+
+    return {
+        "perclos": 0.0 if eye_open else 1.0,
+        "blink_freq": 0.0,
+        "yawn_freq": 0.0,
+        "fatigue_status": "FATIGUE" if is_fatigue else "AWAKE",
+        "reason": reason,
+        "eye_open": eye_open,
+        "mouth_open": mouth_open,
+    }
+
+
+# ==================== 绘制函数（保持不变） ====================
+
+def draw_frame_detections(frame: np.ndarray, detections: List[Dict],
+                          fatigue_status: str, reason: str,
+                          perclos: float = 0.0, blink_freq: float = 0.0) -> np.ndarray:
+    """在视频帧上绘制检测框、疲劳状态面板"""
+    img = frame.copy()
+    h, w = img.shape[:2]
+
+    # 1. 绘制检测框
+    for det in detections:
+        x1, y1, x2, y2 = det["bbox"]
+        label = det["label"]
+        score = det["score"]
+        color = COLOR_MAP.get(label, DEFAULT_COLOR)
+
+        cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)
+
+        text = f"{label}: {score:.2f}"
+        (tw, th), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+        cv2.rectangle(img, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
+        cv2.putText(img, text, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+
+    # 2. 顶部状态面板
+    status_color = (0, 0, 255) if fatigue_status == "FATIGUE" else \
+        (0, 255, 0) if fatigue_status == "AWAKE" else (0, 255, 255)
+
+    panel_h = 90
+    cv2.rectangle(img, (0, 0), (w, panel_h), (50, 50, 50), -1)
+
+    status_text = f"Status: {fatigue_status}"
+    cv2.putText(img, status_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2, cv2.LINE_AA)
+    cv2.putText(img, f"Reason: {reason}", (10, 55), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.putText(img, f"PERCLOS: {perclos:.3f}  Blink: {blink_freq:.3f}",
+                (10, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1, cv2.LINE_AA)
+
+    return img
+
+
+# ==================== 实时疲劳追踪器（新增，复用 camera_detection2.py 逻辑） ====================
+
+class RealtimeFatigueTracker:
+    """
+    改进版疲劳追踪器：
+    - PERCLOS 为主要指标（需持续闭眼 40%+ 才触发）
+    - 眨眼频率为辅助指标（需同时满足 PERCLOS>0.15 才触发，避免误判）
+    - 打哈欠频率为辅助指标
+    - 增加冷却机制，避免连续误触发
+    """
+
+    def __init__(self):
+        self.list_B = np.ones(15, dtype=np.int32)   # 眼睛状态 (1=睁眼, 0=闭眼)
+        self.list_Y = np.zeros(50, dtype=np.int32)  # 嘴巴状态 (1=张开, 0=闭合)
+        self.list_Y1 = np.ones(5, dtype=np.int32)   # 打哈欠判定窗口
+
+        self.blink_count = 0
+        self.yawn_count = 0
+        self.blink_start = time.time()
+        self.yawn_start = time.time()
+        self.blink_freq = -1.0    # -1 表示"尚无有效数据"，避免初始误判
+        self.yawn_freq = 0.0
+
+        # 改进参数
+        self.frame_count = 0
+        self.last_fatigue_frame = -30     # 距上次疲劳判定的帧数（冷却用）
+        self.PERCLOS_THRESHOLD = 0.4      # PERCLOS 主阈值
+        self.BLINK_WINDOW = 30            # 眨眼统计窗口（秒），从10秒延长到30秒
+        self.BLINK_FREQ_LOW = 0.15        # 眨眼频率低阈值（从0.25降低）
+        self.YAWN_THRESHOLD = 5.0 / 60    # 打哈欠阈值（次/秒）
+        self.COOLDOWN_FRAMES = 15         # 疲劳后冷却帧数
+
+    def update(self, detections: List[Dict]) -> Dict:
+        """处理一帧，返回疲劳状态"""
+        self.frame_count += 1
+
+        flag_B = True   # 默认睁眼
+        flag_Y = False  # 默认闭嘴
+        num_rec = len(detections)
+
+        face_box = None
+        mouth_box = None
+
+        # 解析检测结果（适配你的模型类别）
+        for det in detections:
+            label = det["label"]
+            bbox = det["bbox"]
+
+            if label == "Face":
+                face_box = bbox
+            elif label in ["Leye open", "Reye open"]:
+                flag_B = True
+            elif label in ["Leye closed", "Reye closed"]:
+                flag_B = False
+            elif label == "Mouth":
+                mouth_box = bbox
+
+        # 打哈欠判断：Mouth 高度 / Face 高度 > 0.3
+        if mouth_box and face_box:
+            face_h = face_box[3] - face_box[1]
+            mouth_h = mouth_box[3] - mouth_box[1]
+            if face_h > 0:
+                ratio = mouth_h / face_h
+                flag_Y = ratio > 0.3
+
+        # 更新状态队列
+        if num_rec > 0:
+            self.list_B = np.append(self.list_B, 1 if flag_B else 0)
+            self.list_B = np.delete(self.list_B, 0)
+            self.list_Y = np.append(self.list_Y, 1 if flag_Y else 0)
+            self.list_Y = np.delete(self.list_Y, 0)
+        else:
+            # 无人脸检测 → 保持默认（睁眼、闭嘴），避免污染队列
+            self.list_B = np.append(self.list_B, 1)
+            self.list_B = np.delete(self.list_B, 0)
+            self.list_Y = np.append(self.list_Y, 0)
+            self.list_Y = np.delete(self.list_Y, 0)
+
+        # PERCLOS（闭眼时间占比）
+        perclos = 1.0 - np.average(self.list_B)
+
+        # 眨眼检测（仅计数 睁眼→闭眼 的跳变）
+        if len(self.list_B) >= 2:
+            if self.list_B[-2] == 1 and self.list_B[-1] == 0:
+                self.blink_count += 1
+
+        # 每 BLINK_WINDOW 秒评估一次眨眼频率
+        blink_T = time.time() - self.blink_start
+        if blink_T > self.BLINK_WINDOW:
+            # 仅在累积了足够帧数后才更新 blink_freq
+            if self.blink_count > 0 or blink_T > 60:
+                self.blink_freq = self.blink_count / blink_T
+            # 否则保持上次值（初始为 -1，表示无效）
+            self.blink_start = time.time()
+            self.blink_count = 0
+
+        # 打哈欠检测
+        if len(self.list_Y) >= len(self.list_Y1):
+            tail = self.list_Y[-len(self.list_Y1):]
+            if np.array_equal(tail, self.list_Y1):
+                self.yawn_count += 1
+                self.list_Y = np.zeros(50, dtype=np.int32)
+
+        yawn_T = time.time() - self.yawn_start
+        if yawn_T > 60:
+            self.yawn_freq = self.yawn_count / yawn_T
+            self.yawn_start = time.time()
+            self.yawn_count = 0
+
+        # ========== 疲劳判断（改进版） ==========
+        is_fatigue = False
+        reason = "AWAKE"
+
+        frames_since_last = self.frame_count - self.last_fatigue_frame
+
+        # 仅在冷却期过后才评估
+        if frames_since_last > self.COOLDOWN_FRAMES:
+
+            # 主判断：PERCLOS > 0.4 → 闭眼过多 → 疲劳
+            if perclos > self.PERCLOS_THRESHOLD:
+                is_fatigue = True
+                reason = "PERCLOS>0.4"
+
+            # 辅助判断：眨眼频率过低 + PERCLOS 偏高 → 疲劳（需双指标同时满足）
+            elif (self.blink_freq >= 0 and              # blink_freq 已初始化（非 -1）
+                  self.blink_freq < self.BLINK_FREQ_LOW and
+                  perclos > 0.15):
+                is_fatigue = True
+                reason = "BLINK_FREQ_LOW"
+                self.blink_freq = -1.0   # 重置为无效，等待重新统计
+
+            # 辅助判断：打哈欠频率过高 → 疲劳
+            elif self.yawn_freq > self.YAWN_THRESHOLD:
+                is_fatigue = True
+                reason = "YAWN_FREQ_HIGH"
+                self.yawn_freq = 0.0
+
+        if is_fatigue:
+            self.last_fatigue_frame = self.frame_count
+
+        return {
+            "perclos": float(perclos),
+            "blink_freq": float(max(0.0, self.blink_freq)),  # 前端显示用，-1 显示为 0
+            "yawn_freq": float(self.yawn_freq),
+            "fatigue_status": "FATIGUE" if is_fatigue else "AWAKE",
+            "reason": reason,
+            "eye_open": bool(flag_B),
+            "mouth_open": bool(flag_Y),
+        }
+
+
+# ==================== 视频分析器（修改：使用 YOLOv8 + 新追踪器） ====================
+
+class MarkedVideoAnalyzer:
+    """分析视频并输出带标记的视频文件"""
+
+    def __init__(self, fps: float = 30.0):
+        self.fps = fps
+        self.tracker = RealtimeFatigueTracker()
+        self.fatigue_frames = 0
+        self.total_frames = 0
+        self.detected_frames = 0
+
+    def update(self, detections: List[Dict], frame_idx: int) -> Dict:
+        self.total_frames += 1
+        if len(detections) > 0:
+            self.detected_frames += 1
+
+        status = self.tracker.update(detections)
+        if status["fatigue_status"] == "FATIGUE":
+            self.fatigue_frames += 1
+
+        return status
+
+
+def analyze_video_marked(video_path: str, output_path: str, sample_rate: int = 1) -> Dict:
+    """分析视频，输出带标记的视频文件"""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise ValueError(f"无法打开视频: {video_path}")
+
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
+
+    analyzer = MarkedVideoAnalyzer(fps=fps)
+    frame_idx = 0
+    processed_frames = 0
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        if frame_idx % sample_rate == 0:
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            pil_img = Image.fromarray(frame_rgb)
+
+            result = run_inference(pil_img, conf_thresh=0.25)
+            detections = result.get("detections", [])
+
+            status = analyzer.update(detections, frame_idx)
+
+            marked_frame = draw_frame_detections(
+                frame, detections,
+                status["fatigue_status"], status["reason"],
+                status["perclos"], status["blink_freq"]
+            )
+            out.write(marked_frame)
+            processed_frames += 1
+        else:
+            out.write(frame)
+
+        frame_idx += 1
+        if frame_idx % 100 == 0:
+            print(f"[analyze_video_marked] 进度: {frame_idx}/{total_frames}")
+
+    cap.release()
+    out.release()
+
+    duration_sec = total_frames / fps if fps > 0 else 0
+    # 疲劳判定：需疲劳帧占比 > 15%（从10%提高，配合改进版追踪器的冷却机制）
+    fatigue_ratio = analyzer.fatigue_frames / analyzer.total_frames if analyzer.total_frames > 0 else 0
+    is_fatigue = analyzer.fatigue_frames > max(5, analyzer.total_frames * 0.15)
+
+    return {
+        "success": True,
+        "device": DEVICE.type,
+        "output_path": output_path,
+        "total_frames": analyzer.total_frames,
+        "processed_frames": processed_frames,
+        "duration_sec": round(duration_sec, 2),
+        "detected_frames": analyzer.detected_frames,
+        "fatigue_frames": analyzer.fatigue_frames,
+        "fatigue_ratio": round(fatigue_ratio, 4),
+        "is_fatigue": bool(is_fatigue),
+        "conclusion": "FATIGUE" if is_fatigue else "AWAKE",
+        "final_blink_freq": round(float(max(0.0, analyzer.tracker.blink_freq)), 4),
+        "final_yawn_freq": round(float(analyzer.tracker.yawn_freq), 4),
+    }
+
+
+# ==================== 全局实时追踪器（用于 /detect_frame 接口） ====================
+REALTIME_TRACKER = RealtimeFatigueTracker()
+
+
+def reset_tracker() -> None:
+    """重置全局追踪器状态，用于新的视频流会话"""
+    global REALTIME_TRACKER
+    REALTIME_TRACKER = RealtimeFatigueTracker()
+
+
+# ==================== Flask 路由 ====================
+
+@app.get("/health")
+def health() -> tuple:
+    return jsonify({"status": "ok", "device": DEVICE.type}), 200
+
+
+@app.get("/ready")
+def ready() -> tuple:
+    ready_flag = YOLO_MODEL is not None
+    return (
+        jsonify({
+            "ready": ready_flag,
+            "model_path": MODEL_PATH,
+            "device": DEVICE.type,
+        }),
+        200 if ready_flag else 503,
+    )
+
+
+@app.post("/predict")
+def predict() -> tuple:
+    """原有单张图片检测接口"""
+    try:
+        if "image" not in request.files:
+            return jsonify({"success": False, "error": "missing file field: image"}), 400
+        file_obj = request.files["image"]
+        if not file_obj or not file_obj.filename:
+            return jsonify({"success": False, "error": "empty image file"}), 400
+        img = Image.open(file_obj.stream)
+        return jsonify(run_inference(img)), 200
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.post("/analyze_image")
+def analyze_image_endpoint() -> tuple:
+    """图片检测 + 疲劳状态判断（无状态，每张图独立推理）"""
+    try:
+        if "image" not in request.files:
+            return jsonify({"success": False, "error": "missing file field: image"}), 400
+
+        file_obj = request.files["image"]
+        if not file_obj or not file_obj.filename:
+            return jsonify({"success": False, "error": "empty image file"}), 400
+
+        visualize = request.form.get("visualize", "false").lower() == "true"
+        img = Image.open(file_obj.stream)
+
+        result = run_inference(img)
+        detections = result.get("detections", [])
+
+        if not detections:
+            result = run_inference(img, conf_thresh=0.2)
+            detections = result.get("detections", [])
+
+        status = judge_fatigue_from_image(detections)
+
+        fatigue_status = "疲劳" if status["fatigue_status"] == "FATIGUE" else "清醒" if status["fatigue_status"] == "AWAKE" else "未知"
+        prediction_conf = max([d["score"] for d in detections]) if detections else 0.0
+
+        response = {
+            "success": True,
+            "device": DEVICE.type,
+            "count": len(detections),
+            "detections": detections,
+            "fatigue_status": fatigue_status,
+            "reason": status["reason"],
+            "perclos": status["perclos"],
+            "blink_freq": status["blink_freq"],
+            "yawn_freq": status["yawn_freq"],
+            "class_name": "drowsy" if status["fatigue_status"] == "FATIGUE" else "normal",
+            "confidence": prediction_conf,
+            "fatigueState": "drowsy" if status["fatigue_status"] == "FATIGUE" else "normal",
+            "processingTime": 0,
+        }
+
+        if visualize:
+            vis_img = draw_frame_detections(
+                cv2.cvtColor(np.array(img.convert("RGB")), cv2.COLOR_RGB2BGR),
+                detections, status["fatigue_status"], status["reason"],
+                status["perclos"], status["blink_freq"]
+            )
+            _, buffer = cv2.imencode(".jpg", vis_img)
+            img_b64 = base64.b64encode(buffer).decode("utf-8")
+            response["visualization"] = f"data:image/jpeg;base64,{img_b64}"
+
+        return jsonify(response), 200
+
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+# ==================== 新增：实时单帧检测接口（WebSocket 专用） ====================
+
+# 实时帧处理控制（防止单线程 Flask 被帧请求淹没）
+_FRAME_PROCESSING_LOCK = False  # 简单互斥标志，避免积压
+_LAST_FRAME_TIME = 0.0          # 上次处理帧的时间戳
+_MIN_FRAME_INTERVAL = 0.08      # 最小帧间隔（秒），约12fps上限
+
+@app.post("/detect_frame")
+def detect_frame() -> tuple:
+    """
+    单帧实时检测接口（WebSocket 视频流）
+    优化：跳过过期帧，避免单线程积压
+    """
+    global _FRAME_PROCESSING_LOCK, _LAST_FRAME_TIME
+
+    # 帧率保护：丢弃过快到达的帧
+    now = time.time()
+    if now - _LAST_FRAME_TIME < _MIN_FRAME_INTERVAL:
+        return jsonify({"success": True, "skipped": True, "device": DEVICE.type}), 200
+
+    # 忙时保护：上一帧还在处理中 → 跳过当前帧
+    if _FRAME_PROCESSING_LOCK:
+        return jsonify({"success": True, "skipped": True, "device": DEVICE.type}), 200
+    try:
+        if request.args.get("reset", "false").lower() == "true":
+            reset_tracker()
+
+        if "image" not in request.files:
+            return jsonify({"success": False, "error": "missing file field: image"}), 400
+
+        file_obj = request.files["image"]
+        if not file_obj or not file_obj.filename:
+            return jsonify({"success": False, "error": "empty image file"}), 400
+
+        _FRAME_PROCESSING_LOCK = True
+        _LAST_FRAME_TIME = time.time()
+
+        img = Image.open(file_obj.stream).convert("RGB")
+        result = run_inference(img)
+        detections = result.get("detections", [])
+
+        status = REALTIME_TRACKER.update(detections)
+
+        _FRAME_PROCESSING_LOCK = False
+
+        return jsonify({
+            "success": True,
+            "device": DEVICE.type,
+            "detections": detections,
+            "perclos": status["perclos"],
+            "blink_freq": status["blink_freq"],
+            "yawn_freq": status["yawn_freq"],
+            "fatigue_status": status["fatigue_status"],
+            "reason": status["reason"],
+            "eye_open": status["eye_open"],
+            "mouth_open": status["mouth_open"]
+        }), 200
+
+    except Exception as exc:
+        _FRAME_PROCESSING_LOCK = False
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.post("/detect_frame/reset")
+def detect_frame_reset() -> tuple:
+    """重置追踪器状态，用于开始新的视频流会话"""
+    reset_tracker()
+    return jsonify({"success": True, "message": "tracker reset"}), 200
+
+
+# ==================== 视频接口（保持不变） ====================
+
+@app.post("/analyze_video_marked")
+def analyze_video_marked_endpoint() -> tuple:
+    try:
+        if "video" not in request.files:
+            return jsonify({"success": False, "error": "missing file field: video"}), 400
+
+        file_obj = request.files["video"]
+        if not file_obj or not file_obj.filename:
+            return jsonify({"success": False, "error": "empty video file"}), 400
+
+        sample_rate = int(request.form.get("sample_rate", 1))
+        if sample_rate < 1:
+            sample_rate = 1
+
+        suffix = os.path.splitext(file_obj.filename)[1] or ".mp4"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_in:
+            file_obj.save(tmp_in.name)
+            input_path = tmp_in.name
+
+        output_path = input_path.replace(suffix, f"_marked{suffix}")
+
+        try:
+            report = analyze_video_marked(input_path, output_path, sample_rate=sample_rate)
+
+            if os.path.exists(output_path):
+                return send_file(
+                    output_path,
+                    mimetype='video/mp4',
+                    as_attachment=True,
+                    download_name=f"marked_{file_obj.filename}"
+                )
+            else:
+                return jsonify({"success": False, "error": "标记视频生成失败"}), 500
+
+        finally:
+            if os.path.exists(input_path):
+                os.remove(input_path)
+
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+@app.post("/analyze_video")
+def analyze_video() -> tuple:
+    try:
+        if "video" not in request.files:
+            return jsonify({"success": False, "error": "missing file field: video"}), 400
+
+        file_obj = request.files["video"]
+        if not file_obj or not file_obj.filename:
+            return jsonify({"success": False, "error": "empty video file"}), 400
+
+        sample_rate = int(request.form.get("sample_rate", 1))
+        if sample_rate < 1:
+            sample_rate = 1
+
+        suffix = os.path.splitext(file_obj.filename)[1] or ".mp4"
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            file_obj.save(tmp.name)
+            tmp_path = tmp.name
+
+        try:
+            output_path = tmp_path.replace(suffix, f"_out{suffix}")
+            report = analyze_video_marked(tmp_path, output_path, sample_rate=sample_rate)
+            report["success"] = True
+            report["device"] = DEVICE.type
+
+            if os.path.exists(output_path):
+                os.remove(output_path)
+
+            return jsonify(report), 200
+        finally:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+
+    except Exception as exc:
+        traceback.print_exc()
+        return jsonify({"success": False, "error": str(exc)}), 500
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="YOLOv8 fatigue detection API server")
+    parser.add_argument("--model-path", default=MODEL_PATH, help="path to YOLOv8 .pt model")
+    parser.add_argument("--host", default=HOST, help="bind host")
+    parser.add_argument("--port", type=int, default=PORT, help="bind port")
+    parser.add_argument("--conf-thresh", type=float, default=CONF_THRESH, help="confidence threshold")
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    MODEL_PATH = args.model_path
+    HOST = args.host
+    PORT = args.port
+    CONF_THRESH = args.conf_thresh
+
+    if not MODEL_PATH:
+        raise ValueError("missing --model-path (or env AI_SERVER_MODEL_PATH)")
+
+    init_runtime(MODEL_PATH)
+    print(f"server started at http://{HOST}:{PORT}, device={DEVICE.type}, model={MODEL_PATH}")
+    print(f"endpoints: /health /ready /predict /analyze_image /detect_frame /analyze_video /analyze_video_marked")
+    app.run(host=HOST, port=PORT, debug=False, threaded=True)

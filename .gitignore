@@ -1,7 +1,7 @@
 # Compiled output
-/target/
-!/**/src/main/**/target/
-!/**/src/test/**/target/
+**/target/
+!**/src/main/**/target/
+!**/src/test/**/target/
 
 # Frontend
 fatigue_frontend/node_modules/
@@ -23,7 +23,7 @@ fatigue_frontend/.vite/
 .vscode/
 
 # Uploaded files (videos, images, etc.)
-uploads/
+**/uploads/
 
 # Logs
 logs/
@@ -37,14 +37,12 @@ Thumbs.db
 !.mvn/wrapper/maven-wrapper.jar
 
 # Build tools
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-build/
-!/**/src/main/**/build/
-!/**/src/test/**/build/
+**/build/
+!**/src/main/**/build/
+!**/src/test/**/build/
 
-# Other
-HELP.md   # 如果你不想追踪 HELP.md 就保留；否则删除这行
+# Database files (SQLite dev db)
+*.db
+
+# Cursor / AI editor config
+cursorrules

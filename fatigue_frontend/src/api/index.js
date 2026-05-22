@@ -4,8 +4,64 @@ const api = axios.create({
     baseURL: '/api',
     timeout: 60000
     // 注意：不要在这里全局设置 Content-Type: multipart/form-data
-    // 上传文件时浏览器会自动添加正确的 boundary，手动设置反而会导致后端解析失败
 })
+
+// ==================== 请求拦截器：自动带 JWT Token ====================
+
+api.interceptors.request.use(
+    (config) => {
+        const token = localStorage.getItem('token')
+        if (token) {
+            config.headers.Authorization = `Bearer ${token}`
+        }
+        return config
+    },
+    (error) => Promise.reject(error)
+)
+
+// ==================== 响应拦截器：401 时跳转登录 ====================
+
+api.interceptors.response.use(
+    (response) => response,
+    (error) => {
+        if (error.response?.status === 401) {
+            localStorage.removeItem('token')
+            localStorage.removeItem('user')
+            // 排除登录/注册接口本身，避免死循环
+            if (!window.location.pathname.startsWith('/login')) {
+                window.location.href = '/login'
+            }
+        }
+        return Promise.reject(error)
+    }
+)
+
+// ==================== 认证接口 ====================
+
+/**
+ * 用户登录
+ */
+export const login = (data) => {
+    return api.post('/auth/login', data, {
+        headers: { 'Content-Type': 'application/json' }
+    })
+}
+
+/**
+ * 用户注册
+ */
+export const register = (data) => {
+    return api.post('/auth/register', data, {
+        headers: { 'Content-Type': 'application/json' }
+    })
+}
+
+/**
+ * 获取当前用户信息
+ */
+export const getCurrentUser = () => {
+    return api.get('/auth/me')
+}
 
 // ==================== 图片检测 ====================
 

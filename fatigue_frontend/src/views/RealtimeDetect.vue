@@ -50,27 +50,36 @@
               <div class="status-badge-large">
                 <div class="status-icon-wrapper">
                   <el-icon v-if="currentResult.resultClass === 'drowsy'" class="warning-icon"><WarningFilled /></el-icon>
+                  <el-icon v-else-if="currentResult.resultClass === 'unknown'" class="unknown-icon"><QuestionFilled /></el-icon>
                   <el-icon v-else class="success-icon"><CircleCheckFilled /></el-icon>
                 </div>
                 <div class="status-text">
-                  <span class="status-label">{{ currentResult.resultClass === 'drowsy' ? '疲劳 detected' : '状态正常' }}</span>
-                  <span class="confidence">置信度 {{ (currentResult.confidence * 100).toFixed(1) }}%</span>
+                  <span class="status-label">
+                    {{ currentResult.resultClass === 'drowsy' ? '疲劳' :
+                       currentResult.resultClass === 'unknown' ? '未检测到人脸' : '状态正常' }}
+                  </span>
+                  <span class="confidence" v-if="currentResult.resultClass !== 'unknown'">
+                    置信度 {{ ((currentResult.confidence || 0) * 100).toFixed(1) }}%
+                  </span>
+                  <span class="reason-text" v-if="currentResult.reason">
+                    原因: {{ currentResult.reason }}
+                  </span>
                 </div>
               </div>
 
-              <!-- 新增：详细指标 -->
-              <div class="detail-metrics" v-if="currentResult.perclos !== undefined">
-                <div class="metric">
+              <!-- 详细生理指标 -->
+              <div class="detail-metrics" v-if="currentResult.resultClass !== 'unknown'">
+                <div class="metric" :class="{ danger: currentResult.perclos > 0.3 }">
                   <span class="metric-label">PERCLOS</span>
-                  <span class="metric-value">{{ currentResult.perclos?.toFixed(3) }}</span>
+                  <span class="metric-value">{{ (currentResult.perclos || 0).toFixed(3) }}</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">眨眼频率</span>
-                  <span class="metric-value">{{ currentResult.blinkFreq?.toFixed(3) || '-' }}</span>
+                  <span class="metric-value">{{ (currentResult.blinkFreq || 0).toFixed(3) }}</span>
                 </div>
                 <div class="metric">
                   <span class="metric-label">哈欠频率</span>
-                  <span class="metric-value">{{ currentResult.yawnFreq?.toFixed(4) || '-' }}</span>
+                  <span class="metric-value">{{ (currentResult.yawnFreq || 0).toFixed(4) }}</span>
                 </div>
               </div>
             </div>
@@ -249,7 +258,7 @@ import {
   VideoCamera, VideoPlay, VideoPause, WarningFilled, CircleCheckFilled,
   CircleCheck, CircleClose, Loading, Odometer, Timer, DataLine,
   TrendCharts, Refresh, Warning, PieChart, List, InfoFilled,
-  Delete
+  Delete, QuestionFilled
 } from '@element-plus/icons-vue'
 
 const videoRef = ref(null)
@@ -340,7 +349,7 @@ const startDetection = async () => {
     lastTime = Date.now()
     addLog('开始实时监测', 'success')
 
-    captureInterval = setInterval(captureFrame, 100)
+    captureInterval = setInterval(captureFrame, 150)  // ~7fps，匹配AI处理能力
 
   } catch (error) {
     ElMessage.error('启动失败：' + error.message)
@@ -389,6 +398,14 @@ const stopDetection = () => {
     stream.getTracks().forEach(track => track.stop())
     stream = null
   }
+
+  // 【修复】清除 overlay canvas 上的检测框残留，避免停止后最后一帧的框仍显示在页面上
+  const canvas = overlayCanvasRef.value
+  if (canvas) {
+    const ctx = canvas.getContext('2d')
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+  }
+
   wsStatus.value = 'disconnected'
   currentResult.value = null
   showWarning.value = false
@@ -405,16 +422,20 @@ const captureFrame = () => {
   const canvas = canvasRef.value
   const ctx = canvas.getContext('2d')
 
-  canvas.width = 169
-  canvas.height = 160
+  canvas.width = 480
+  canvas.height = 360
 
-  const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight)
+  // contain 缩放：完整保留画面，不裁切，留黑边填充
+  const scale = Math.min(canvas.width / video.videoWidth, canvas.height / video.videoHeight)
   const x = (canvas.width - video.videoWidth * scale) / 2
   const y = (canvas.height - video.videoHeight * scale) / 2
 
+  // 黑底
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
   ctx.drawImage(video, x, y, video.videoWidth * scale, video.videoHeight * scale)
 
-  const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]
+  const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
 
   const startTime = Date.now()
   ws.sendFrame({
@@ -442,20 +463,39 @@ const handleWsMessage = (data) => {
       addLog('WebSocket已连接', 'success')
       break
     case 'detection_result':
-      currentResult.value = data.result
-      stats.value = data.sessionStats || { totalFrames: 0, drowsyFrames: 0 }
-      drawOverlay(data.result)   // 【新增】画检测框
+      // 归一化类名（后端去重已防抖，无需额外滑动窗口）
+      const cls = (data.result.class || '').toLowerCase()
+      const mapped = {
+        resultClass: cls === 'awake' ? 'alert' : (cls === 'fatigue' ? 'drowsy' : cls),
+        confidence: data.result.confidence || 0,
+        isDrowsy: data.result.isDrowsy || false,
+        perclos: data.result.perclos,
+        blinkFreq: data.result.blinkFreq,
+        yawnFreq: data.result.yawnFreq,
+        fatigueStatus: data.result.fatigueStatus,
+        reason: data.result.reason,
+        detections: data.result.detections || []
+      }
 
-      // 更新迷你图表
+      currentResult.value = mapped
+      stats.value = data.sessionStats || { totalFrames: 0, drowsyFrames: 0 }
+      drawOverlay(mapped)
+
       updateMiniChart()
 
-      // 检测持续疲劳
       if (stats.value.drowsyFrames > 10 &&
           stats.value.drowsyFrames > stats.value.totalFrames * 0.5) {
         showWarning.value = true
       } else {
         showWarning.value = false
       }
+      break
+    case 'detection_boxes':
+      // 轻量消息：仅刷新检测框坐标，不更改疲劳状态判断
+      if (currentResult.value && data.result) {
+        currentResult.value.detections = data.result.detections || []
+      }
+      drawOverlay(data.result)
       break
     case 'warning':
       addLog(data.message, 'warning')
@@ -491,9 +531,9 @@ const drawOverlay = (result) => {
   const ctx = canvas.getContext('2d')
   ctx.clearRect(0, 0, canvas.width, canvas.height)
 
-  // 前端传给 AI 的图是 169×160（captureFrame 里写死的），把坐标映射到显示尺寸
-  const aiWidth = 169
-  const aiHeight = 160
+  // AI 端收到的图是 480×360，把检测框坐标映射到视频显示尺寸
+  const aiWidth = 480
+  const aiHeight = 360
   const scaleX = canvas.width / aiWidth
   const scaleY = canvas.height / aiHeight
 
@@ -741,6 +781,11 @@ onUnmounted(() => {
   animation: pulse-danger 2s infinite;
 }
 
+.detection-overlay.unknown {
+  background: rgba(245, 158, 11, 0.2);
+  border-color: rgba(245, 158, 11, 0.4);
+}
+
 @keyframes pulse-danger {
   0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
   50% { box-shadow: 0 0 20px 10px rgba(239, 68, 68, 0.2); }
@@ -779,10 +824,56 @@ onUnmounted(() => {
   animation: shake 0.5s ease-in-out infinite;
 }
 
+.unknown-icon {
+  color: #f59e0b;
+}
+
 @keyframes shake {
   0%, 100% { transform: rotate(0deg); }
   25% { transform: rotate(-10deg); }
   75% { transform: rotate(10deg); }
+}
+
+.reason-text {
+  font-size: 11px;
+  color: #94a3b8;
+  display: block;
+  margin-top: 2px;
+}
+
+.detection-overlay.unknown .status-icon-wrapper {
+  background: rgba(245, 158, 11, 0.3);
+}
+
+/* 生理指标条 */
+.detail-metrics {
+  display: flex;
+  gap: 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.15);
+}
+
+.metric {
+  text-align: center;
+  min-width: 70px;
+}
+
+.metric-label {
+  font-size: 10px;
+  color: rgba(255,255,255,0.6);
+  display: block;
+  margin-bottom: 2px;
+}
+
+.metric-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: #f8fafc;
+}
+
+.metric.danger .metric-value {
+  color: #f87171;
 }
 
 .status-text {

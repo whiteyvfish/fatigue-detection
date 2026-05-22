@@ -43,6 +43,9 @@ public class DetectionResult {
     @JsonProperty("visualization")
     private String visualization;
 
+    @JsonProperty("instant_fatigue")
+    private Boolean instantFatigue;   // 即时疲劳标志（统计面板用）
+
     // ========== 手动 getter / setter（彻底避免Lombok自动生成冲突）==========
 
     public boolean isSuccess() { return success; }
@@ -98,6 +101,9 @@ public class DetectionResult {
 
     public String getVisualization() { return visualization; }
     public void setVisualization(String visualization) { this.visualization = visualization; }
+
+    public Boolean getInstantFatigue() { return instantFatigue; }
+    public void setInstantFatigue(Boolean instantFatigue) { this.instantFatigue = instantFatigue; }
 
     @NoArgsConstructor
     @JsonIgnoreProperties(ignoreUnknown = true)

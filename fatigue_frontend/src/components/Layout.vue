@@ -781,16 +781,14 @@
               <el-avatar :size="32" class="user-avatar">
                 <el-icon><User /></el-icon>
               </el-avatar>
-              <span class="user-name" v-if="!isMobile">管理员</span>
+              <span class="user-name" v-if="!isMobile">{{ currentUser?.nickname || currentUser?.username || '用户' }}</span>
               <el-icon><ArrowDown /></el-icon>
             </div>
             <template #dropdown>
               <el-dropdown-menu class="custom-dropdown">
-                <el-dropdown-item @click="goToProfile">
-                  <el-icon><User /></el-icon>个人中心
-                </el-dropdown-item>
-                <el-dropdown-item @click="goToSettings">
-                  <el-icon><Setting /></el-icon>系统设置
+                <el-dropdown-item>
+                  <el-icon><User /></el-icon>
+                  <span>{{ currentUser?.username || '-' }}</span>
                 </el-dropdown-item>
                 <el-dropdown-item divided @click="logout">
                   <el-icon><SwitchButton /></el-icon>退出登录
@@ -857,6 +855,19 @@ const router = useRouter()
 // 侧边栏状态
 const isCollapsed = ref(false)
 const isMobile = ref(false)
+
+// 当前用户
+const currentUser = ref(null)
+
+// 初始化时从 localStorage 读取用户信息
+try {
+    const stored = localStorage.getItem('user')
+    if (stored) {
+        currentUser.value = JSON.parse(stored)
+    }
+} catch (e) {
+    // ignore
+}
 
 // 系统状态
 const systemStatus = ref('running')
@@ -928,16 +939,6 @@ const showNotifications = () => {
   notificationCount.value = 0
 }
 
-// 个人中心
-const goToProfile = () => {
-  ElMessage.info('个人中心功能开发中')
-}
-
-// 系统设置
-const goToSettings = () => {
-  ElMessage.info('系统设置功能开发中')
-}
-
 // 退出登录
 const logout = () => {
   ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -945,6 +946,8 @@ const logout = () => {
     cancelButtonText: '取消',
     type: 'warning'
   }).then(() => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
     ElMessage.success('已退出登录')
     router.push('/login')
   }).catch(() => {})

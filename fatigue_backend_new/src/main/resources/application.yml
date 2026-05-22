@@ -1,7 +1,7 @@
 server:
   port: 8080
   servlet:
-   context-path: /api
+    context-path: /api
   tomcat:
     threads:
       max: 200        # 最大线程数
@@ -29,12 +29,12 @@ spring:
       max-file-size: 200MB
   application:
     name: fatigue-detection
-  # 数据库配置（SQLite - 开发环境）
-#  datasource:
-#    url: jdbc:sqlite:fatigue_detection.db
-#    driver-class-name: org.sqlite.JDBC
-#    username: ""
-#    password: ""
+    # 数据库配置（SQLite - 开发环境）
+    #  datasource:
+    #    url: jdbc:sqlite:fatigue_detection.db
+    #    driver-class-name: org.sqlite.JDBC
+    #    username: ""
+    #    password: ""
 
     # MySQL配置（生产环境，取消注释使用）
   datasource:
@@ -78,9 +78,9 @@ video:
 ai:
   service:
     url: http://localhost:5000
-    timeout: 30000            # 图片检测超时（30秒）
-    video-timeout: 300000     # 视频分析超时（5分钟）
-    max-connections: 20       # 连接池大小
+    timeout: 120000            # 图片检测超时（120秒，CPU推理需要更长时间）
+    video-timeout: 600000      # 视频分析超时（10分钟）
+    max-connections: 20        # 连接池大小
 # 日志
 logging:
   level:
@@ -89,7 +89,7 @@ logging:
 # MyBatis-Plus配置
 mybatis-plus:
   mapper-locations: classpath*:/mapper/**/*.xml
-  type-aliases-package: com.traffic.entity
+  type-aliases-package: com.fatigue.detection.entity
   configuration:
     map-underscore-to-camel-case: true
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl  # 开发环境打印SQL
@@ -97,3 +97,10 @@ mybatis-plus:
     db-config:
       id-type: auto
       logic-delete-field: deleted  # 逻辑删除字段
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+# JWT配置
+jwt:
+  secret: fatigue-detection-secret-key-2024
+  expiration: 86400000  # 24小时 = 24 * 60 * 60 * 1000
