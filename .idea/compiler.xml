@@ -9,9 +9,6 @@
         <module name="fatigue_backend_new" />
       </profile>
     </annotationProcessing>
-    <bytecodeTargetLevel>
-      <module name="fatigue_backend_new" target="1.8" />
-    </bytecodeTargetLevel>
   </component>
   <component name="JavacSettings">
     <option name="ADDITIONAL_OPTIONS_OVERRIDE">

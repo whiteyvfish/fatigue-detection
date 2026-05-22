@@ -1,418 +1,3 @@
-<!--<template>-->
-<!--  <div class="realtime-container">-->
-<!--    <el-row :gutter="20">-->
-<!--      <el-col :span="16">-->
-<!--        <el-card>-->
-<!--          <template #header>-->
-<!--            <div class="card-header">-->
-<!--              <span>实时视频监测</span>-->
-<!--              <div>-->
-<!--                <el-tag :type="isDetecting ? 'success' : 'info'" style="margin-right: 10px;">-->
-<!--                  {{ isDetecting ? '监测中' : '已停止' }}-->
-<!--                </el-tag>-->
-<!--                <el-button-->
-<!--                    :type="isDetecting ? 'danger' : 'primary'"-->
-<!--                    @click="toggleDetection"-->
-<!--                >-->
-<!--                  {{ isDetecting ? '停止监测' : '开始监测' }}-->
-<!--                </el-button>-->
-<!--              </div>-->
-<!--            </div>-->
-<!--          </template>-->
-
-<!--          <div class="video-container">-->
-<!--            <video-->
-<!--                ref="videoRef"-->
-<!--                autoplay-->
-<!--                playsinline-->
-<!--                muted-->
-<!--                class="video-element"-->
-<!--            ></video>-->
-
-<!--            <div v-if="currentResult" class="overlay-info" :class="currentResult.resultClass">-->
-<!--              <div class="status-badge">-->
-<!--                {{ currentResult.resultClass === 'drowsy' ? '⚠️ 疲劳 detected' : '✓ Normal' }}-->
-<!--              </div>-->
-<!--              <div class="confidence">-->
-<!--                Confidence: {{ (currentResult.confidence * 100).toFixed(1) }}%-->
-<!--              </div>-->
-<!--            </div>-->
-
-<!--            <canvas ref="canvasRef" style="display: none;"></canvas>-->
-<!--          </div>-->
-
-<!--          <div v-if="wsStatus" class="ws-status" :class="wsStatus">-->
-<!--            WebSocket: {{ wsStatus }}-->
-<!--          </div>-->
-<!--        </el-card>-->
-<!--      </el-col>-->
-
-<!--      <el-col :span="8">-->
-<!--        <el-card>-->
-<!--          <template #header>-->
-<!--            <span>实时统计</span>-->
-<!--          </template>-->
-
-<!--          <div class="stats-panel">-->
-<!--            <div class="stat-item">-->
-<!--              <div class="stat-value">{{ stats.totalFrames }}</div>-->
-<!--              <div class="stat-label">总帧数</div>-->
-<!--            </div>-->
-
-<!--            <div class="stat-item">-->
-<!--              <div class="stat-value" :class="{ 'danger': stats.drowsyFrames > 0 }">-->
-<!--                {{ stats.drowsyFrames }}-->
-<!--              </div>-->
-<!--              <div class="stat-label">疲劳帧数</div>-->
-<!--            </div>-->
-
-<!--            <div class="stat-item">-->
-<!--              <div class="stat-value">{{ drowsyRate }}</div>-->
-<!--              <div class="stat-label">疲劳占比</div>-->
-<!--            </div>-->
-<!--          </div>-->
-
-<!--          <el-alert-->
-<!--              v-if="showWarning"-->
-<!--              title="持续检测到疲劳状态！"-->
-<!--              type="error"-->
-<!--              description="请立即停车休息，避免发生危险！"-->
-<!--              show-icon-->
-<!--              :closable="false"-->
-<!--              style="margin-top: 20px;"-->
-<!--          />-->
-<!--        </el-card>-->
-
-<!--        <el-card style="margin-top: 20px;">-->
-<!--          <template #header>-->
-<!--            <span>系统日志</span>-->
-<!--          </template>-->
-<!--          <div class="log-panel">-->
-<!--            <div v-for="(log, index) in logs" :key="index" class="log-item" :class="log.type">-->
-<!--              [{{ log.time }}] {{ log.message }}-->
-<!--            </div>-->
-<!--          </div>-->
-<!--        </el-card>-->
-<!--      </el-col>-->
-<!--    </el-row>-->
-<!--  </div>-->
-<!--</template>-->
-
-<!--<script setup>-->
-<!--import { ref, computed, onUnmounted } from 'vue'-->
-<!--import { ElMessage } from 'element-plus'-->
-<!--import { DetectionWebSocket } from '@/api'-->
-
-<!--const videoRef = ref(null)-->
-<!--const canvasRef = ref(null)-->
-<!--const isDetecting = ref(false)-->
-<!--const wsStatus = ref('disconnected')-->
-<!--const currentResult = ref(null)-->
-<!--const stats = ref({ totalFrames: 0, drowsyFrames: 0 })-->
-<!--const logs = ref([])-->
-<!--const showWarning = ref(false)-->
-
-<!--let ws = null-->
-<!--let stream = null-->
-<!--let captureInterval = null-->
-
-<!--const drowsyRate = computed(() => {-->
-<!--  if (stats.value.totalFrames === 0) return '0%'-->
-<!--  return ((stats.value.drowsyFrames / stats.value.totalFrames) * 100).toFixed(1) + '%'-->
-<!--})-->
-
-<!--const addLog = (message, type = 'info') => {-->
-<!--  const time = new Date().toLocaleTimeString()-->
-<!--  logs.value.unshift({ time, message, type })-->
-<!--  if (logs.value.length > 20) logs.value.pop()-->
-<!--}-->
-
-<!--const toggleDetection = async () => {-->
-<!--  if (isDetecting.value) {-->
-<!--    stopDetection()-->
-<!--  } else {-->
-<!--    await startDetection()-->
-<!--  }-->
-<!--}-->
-
-<!--const startDetection = async () => {-->
-<!--  try {-->
-<!--    // 获取摄像头权限-->
-<!--    stream = await navigator.mediaDevices.getUserMedia({-->
-<!--      video: { width: 640, height: 480, frameRate: { ideal: 10, max: 15 } },-->
-<!--      audio: false-->
-<!--    })-->
-<!--    videoRef.value.srcObject = stream-->
-
-<!--    // 建立WebSocket连接-->
-<!--    ws = new DetectionWebSocket(-->
-<!--        (data) => handleWsMessage(data),-->
-<!--        (error) => {-->
-<!--          console.error('WebSocket错误:', error)-->
-<!--          wsStatus.value = 'error'-->
-<!--        }-->
-<!--    )-->
-<!--    ws.connect()-->
-
-<!--    isDetecting.value = true-->
-<!--    addLog('开始实时监测', 'success')-->
-
-<!--    // 开始捕获帧（每100ms一帧，即10fps）-->
-<!--    captureInterval = setInterval(captureFrame, 100)-->
-
-<!--  } catch (error) {-->
-<!--    ElMessage.error('启动失败：' + error.message)-->
-<!--    addLog('启动失败: ' + error.message, 'error')-->
-<!--  }-->
-<!--}-->
-
-<!--const stopDetection = () => {-->
-<!--  isDetecting.value = false-->
-
-<!--  if (captureInterval) {-->
-<!--    clearInterval(captureInterval)-->
-<!--    captureInterval = null-->
-<!--  }-->
-
-<!--  if (ws) {-->
-<!--    ws.disconnect()-->
-<!--    ws = null-->
-<!--  }-->
-
-<!--  if (stream) {-->
-<!--    stream.getTracks().forEach(track => track.stop())-->
-<!--    stream = null-->
-<!--  }-->
-
-<!--  wsStatus.value = 'disconnected'-->
-<!--  addLog('停止监测', 'info')-->
-<!--}-->
-
-<!--// const captureFrame = () => {-->
-<!--//   if (!isDetecting.value || !videoRef.value || !canvasRef.value) return-->
-<!--//-->
-<!--//   const video = videoRef.value-->
-<!--//   const canvas = canvasRef.value-->
-<!--//   const ctx = canvas.getContext('2d')-->
-<!--//-->
-<!--//   // 设置canvas尺寸为模型输入尺寸-->
-<!--//   canvas.width = 224-->
-<!--//   canvas.height = 224-->
-<!--//-->
-<!--//   // 绘制视频帧（居中裁剪）-->
-<!--//   const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight)-->
-<!--//   const x = (canvas.width - video.videoWidth * scale) / 2-->
-<!--//   const y = (canvas.height - video.videoHeight * scale) / 2-->
-<!--//-->
-<!--//   ctx.drawImage(video, x, y, video.videoWidth * scale, video.videoHeight * scale)-->
-<!--//-->
-<!--//   // 转为Base64并发送-->
-<!--//   const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]-->
-<!--//   if (ws) ws.sendFrame(base64)-->
-<!--// }-->
-<!--const captureFrame = () => {-->
-<!--  if (!isDetecting.value || !videoRef.value || !canvasRef.value) return-->
-
-<!--  const video = videoRef.value-->
-<!--  const canvas = canvasRef.value-->
-<!--  const ctx = canvas.getContext('2d')-->
-
-<!--  // 设置canvas尺寸为模型输入尺寸-->
-<!--  canvas.width = 224-->
-<!--  canvas.height = 224-->
-
-<!--  // 绘制视频帧（居中裁剪）-->
-<!--  const scale = Math.max(canvas.width / video.videoWidth, canvas.height / video.videoHeight)-->
-<!--  const x = (canvas.width - video.videoWidth * scale) / 2-->
-<!--  const y = (canvas.height - video.videoHeight * scale) / 2-->
-
-<!--  ctx.drawImage(video, x, y, video.videoWidth * scale, video.videoHeight * scale)-->
-
-<!--  // 转为Base64（去掉 data:image/jpeg;base64, 前缀）-->
-<!--  const base64 = canvas.toDataURL('image/jpeg', 0.8).split(',')[1]-->
-
-<!--  // 修改：发送 JSON 对象，包含 imageBase64 字段-->
-<!--  const frameData = {-->
-<!--    imageBase64: base64,-->
-<!--    frameIndex: stats.value.totalFrames  // 添加帧序号-->
-<!--  }-->
-
-<!--  //if (ws) ws.sendFrame(JSON.stringify(frameData))  // 发送 JSON 字符串-->
-<!--  ws.sendFrame({-->
-<!--    imageBase64: base64,-->
-<!--    frameIndex: stats.value.totalFrames-->
-<!--  })-->
-<!--}-->
-<!--const handleWsMessage = (data) => {-->
-<!--  switch (data.type) {-->
-<!--    case 'connected':-->
-<!--      wsStatus.value = 'connected'-->
-<!--      addLog('WebSocket已连接', 'success')-->
-<!--      break-->
-<!--    case 'detection_result':-->
-<!--      currentResult.value = data.result-->
-<!--      stats.value = data.sessionStats || { totalFrames: 0, drowsyFrames: 0 }-->
-
-<!--      // 检测持续疲劳-->
-<!--      if (stats.value.drowsyFrames > 10 &&-->
-<!--          stats.value.drowsyFrames > stats.value.totalFrames * 0.5) {-->
-<!--        showWarning.value = true-->
-<!--      } else {-->
-<!--        showWarning.value = false-->
-<!--      }-->
-<!--      break-->
-<!--    case 'warning':-->
-<!--      addLog(data.message, 'warning')-->
-<!--      showWarning.value = true-->
-<!--      break-->
-<!--    case 'error':-->
-<!--      addLog(data.message, 'error')-->
-<!--      break-->
-<!--  }-->
-<!--}-->
-
-<!--onUnmounted(() => {-->
-<!--  stopDetection()-->
-<!--})-->
-<!--</script>-->
-
-<!--<style scoped>-->
-<!--.realtime-container {-->
-<!--  max-width: 1400px;-->
-<!--  margin: 0 auto;-->
-<!--}-->
-
-<!--.card-header {-->
-<!--  display: flex;-->
-<!--  justify-content: space-between;-->
-<!--  align-items: center;-->
-<!--  font-weight: bold;-->
-<!--}-->
-
-<!--.video-container {-->
-<!--  position: relative;-->
-<!--  background: #000;-->
-<!--  border-radius: 8px;-->
-<!--  overflow: hidden;-->
-<!--  aspect-ratio: 4/3;-->
-<!--}-->
-
-<!--.video-element {-->
-<!--  width: 100%;-->
-<!--  height: 100%;-->
-<!--  object-fit: cover;-->
-<!--}-->
-
-<!--.overlay-info {-->
-<!--  position: absolute;-->
-<!--  top: 20px;-->
-<!--  left: 20px;-->
-<!--  padding: 15px 20px;-->
-<!--  border-radius: 8px;-->
-<!--  color: white;-->
-<!--  font-weight: bold;-->
-<!--  backdrop-filter: blur(10px);-->
-<!--}-->
-
-<!--.overlay-info.alert {-->
-<!--  background: rgba(103, 194, 58, 0.8);-->
-<!--}-->
-
-<!--.overlay-info.drowsy {-->
-<!--  background: rgba(245, 108, 108, 0.9);-->
-<!--  animation: pulse 2s infinite;-->
-<!--}-->
-
-<!--@keyframes pulse {-->
-<!--  0%, 100% { opacity: 1; }-->
-<!--  50% { opacity: 0.7; }-->
-<!--}-->
-
-<!--.status-badge {-->
-<!--  font-size: 18px;-->
-<!--  margin-bottom: 5px;-->
-<!--}-->
-
-<!--.ws-status {-->
-<!--  margin-top: 10px;-->
-<!--  padding: 5px 10px;-->
-<!--  border-radius: 4px;-->
-<!--  font-size: 12px;-->
-<!--  display: inline-block;-->
-<!--}-->
-
-<!--.ws-status.connected {-->
-<!--  background: #f0f9ff;-->
-<!--  color: #409eff;-->
-<!--}-->
-
-<!--.ws-status.disconnected {-->
-<!--  background: #f4f4f5;-->
-<!--  color: #909399;-->
-<!--}-->
-
-<!--.ws-status.error {-->
-<!--  background: #fef0f0;-->
-<!--  color: #f56c6c;-->
-<!--}-->
-
-<!--.stats-panel {-->
-<!--  display: grid;-->
-<!--  grid-template-columns: repeat(3, 1fr);-->
-<!--  gap: 15px;-->
-<!--  text-align: center;-->
-<!--}-->
-
-<!--.stat-item {-->
-<!--  padding: 15px;-->
-<!--  background: #f5f7fa;-->
-<!--  border-radius: 8px;-->
-<!--}-->
-
-<!--.stat-value {-->
-<!--  font-size: 28px;-->
-<!--  font-weight: bold;-->
-<!--  color: #409eff;-->
-<!--  margin-bottom: 5px;-->
-<!--}-->
-
-<!--.stat-value.danger {-->
-<!--  color: #f56c6c;-->
-<!--}-->
-
-<!--.stat-label {-->
-<!--  font-size: 14px;-->
-<!--  color: #909399;-->
-<!--}-->
-
-<!--.log-panel {-->
-<!--  height: 200px;-->
-<!--  overflow-y: auto;-->
-<!--  background: #f5f7fa;-->
-<!--  padding: 10px;-->
-<!--  border-radius: 4px;-->
-<!--  font-family: monospace;-->
-<!--  font-size: 12px;-->
-<!--}-->
-
-<!--.log-item {-->
-<!--  margin-bottom: 5px;-->
-<!--  padding: 3px 0;-->
-<!--  border-bottom: 1px solid #ebeef5;-->
-<!--}-->
-
-<!--.log-item.error {-->
-<!--  color: #f56c6c;-->
-<!--}-->
-
-<!--.log-item.success {-->
-<!--  color: #67c23a;-->
-<!--}-->
-
-<!--.log-item.warning {-->
-<!--  color: #e6a23c;-->
-<!--}-->
-<!--</style>-->
 <template>
   <div class="realtime-page">
     <!-- 页面标题 -->
@@ -508,6 +93,7 @@
             </div>
 
             <canvas ref="canvasRef" style="display: none;"></canvas>
+            <canvas ref="overlayCanvasRef" class="overlay-canvas"></canvas>
           </div>
 
           <!-- 实时数据条 -->
@@ -668,6 +254,7 @@ import {
 
 const videoRef = ref(null)
 const canvasRef = ref(null)
+const overlayCanvasRef = ref(null)
 const miniChartRef = ref(null)
 const logContainerRef = ref(null)
 
@@ -691,6 +278,19 @@ const drowsyRate = computed(() => {
   if (stats.value.totalFrames === 0) return '0%'
   return ((stats.value.drowsyFrames / stats.value.totalFrames) * 100).toFixed(1) + '%'
 })
+
+const onVideoLoaded = () => {
+  videoLoaded.value = true
+  if (videoRef.value) {
+    videoDuration.value = videoRef.value.duration
+    // 【新增】同步 overlay canvas 尺寸
+    const rect = videoRef.value.getBoundingClientRect()
+    if (overlayCanvasRef.value) {
+      overlayCanvasRef.value.width = rect.width
+      overlayCanvasRef.value.height = rect.height
+    }
+  }
+}
 
 const wsStatusText = computed(() => {
   const map = {
@@ -721,8 +321,11 @@ const toggleDetection = async () => {
     await startDetection()
   }
 }
+let reconnectTimer = null
+let isManualStop = false   // 【新增】区分手动停止还是异常断开
 
 const startDetection = async () => {
+  isManualStop = false
   try {
     stream = await navigator.mediaDevices.getUserMedia({
       video: { width: 640, height: 480, frameRate: { ideal: 10, max: 15 } },
@@ -730,15 +333,7 @@ const startDetection = async () => {
     })
     videoRef.value.srcObject = stream
 
-    ws = new DetectionWebSocket(
-        (data) => handleWsMessage(data),
-        (error) => {
-          console.error('WebSocket错误:', error)
-          wsStatus.value = 'error'
-          addLog('WebSocket连接错误', 'error')
-        }
-    )
-    ws.connect()
+    connectWs()  // 【抽出来】
 
     isDetecting.value = true
     frameCount = 0
@@ -753,24 +348,47 @@ const startDetection = async () => {
   }
 }
 
-const stopDetection = () => {
-  isDetecting.value = false
+// 【新增】抽离连接逻辑，支持重连
+const connectWs = () => {
+  if (ws) {
+    try { ws.disconnect() } catch (e) {}
+  }
 
+  ws = new DetectionWebSocket(
+      (data) => handleWsMessage(data),
+      (error) => {
+        console.error('WebSocket错误:', error)
+        wsStatus.value = 'error'
+        addLog('WebSocket连接错误，3秒后尝试重连...', 'error')
+        // 自动重连（只要不是手动停止）
+        if (!isManualStop && isDetecting.value) {
+          clearTimeout(reconnectTimer)
+          reconnectTimer = setTimeout(() => {
+            if (isDetecting.value) connectWs()
+          }, 3000)
+        }
+      }
+  )
+  ws.connect()
+}
+
+const stopDetection = () => {
+  isManualStop = true   // 【新增】标记手动停止
+  clearTimeout(reconnectTimer)
+
+  isDetecting.value = false
   if (captureInterval) {
     clearInterval(captureInterval)
     captureInterval = null
   }
-
   if (ws) {
     ws.disconnect()
     ws = null
   }
-
   if (stream) {
     stream.getTracks().forEach(track => track.stop())
     stream = null
   }
-
   wsStatus.value = 'disconnected'
   currentResult.value = null
   showWarning.value = false
@@ -778,6 +396,7 @@ const stopDetection = () => {
   latency.value = 0
   addLog('停止监测', 'info')
 }
+
 
 const captureFrame = () => {
   if (!isDetecting.value || !videoRef.value || !canvasRef.value) return
@@ -825,6 +444,7 @@ const handleWsMessage = (data) => {
     case 'detection_result':
       currentResult.value = data.result
       stats.value = data.sessionStats || { totalFrames: 0, drowsyFrames: 0 }
+      drawOverlay(data.result)   // 【新增】画检测框
 
       // 更新迷你图表
       updateMiniChart()
@@ -854,6 +474,61 @@ const resetStats = () => {
 
 const clearLogs = () => {
   logs.value = []
+}
+
+const drawOverlay = (result) => {
+  const canvas = overlayCanvasRef.value
+  const video = videoRef.value
+  if (!canvas || !video || !result) return
+
+  // 保证 canvas 像素尺寸和显示尺寸一致
+  const rect = video.getBoundingClientRect()
+  if (canvas.width !== rect.width || canvas.height !== rect.height) {
+    canvas.width = rect.width
+    canvas.height = rect.height
+  }
+
+  const ctx = canvas.getContext('2d')
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+
+  // 前端传给 AI 的图是 169×160（captureFrame 里写死的），把坐标映射到显示尺寸
+  const aiWidth = 169
+  const aiHeight = 160
+  const scaleX = canvas.width / aiWidth
+  const scaleY = canvas.height / aiHeight
+
+  const detections = result.detections || []
+  detections.forEach(det => {
+    const [x1, y1, x2, y2] = det.bbox || [0, 0, 0, 0]
+    const label = det.label || 'unknown'
+    const score = det.score || 0
+
+    const rx1 = x1 * scaleX
+    const ry1 = y1 * scaleY
+    const rw = (x2 - x1) * scaleX
+    const rh = (y2 - y1) * scaleY
+
+    // 颜色：闭眼/哈欠/低头 → 红色，其他 → 绿色
+    const isFatigue = ['close_eyes', 'yawn', 'head_low'].some(k => label.toLowerCase().includes(k))
+    ctx.strokeStyle = isFatigue ? '#ef4444' : '#10b981'
+    ctx.lineWidth = 2
+
+    // 画框
+    ctx.strokeRect(rx1, ry1, rw, rh)
+
+    // 文字标签
+    const text = `${label} ${(score * 100).toFixed(0)}%`
+    ctx.font = 'bold 12px sans-serif'
+    const tw = ctx.measureText(text).width
+
+    // 文字背景
+    ctx.fillStyle = ctx.strokeStyle
+    ctx.fillRect(rx1, Math.max(0, ry1 - 18), tw + 8, 18)
+
+    // 文字
+    ctx.fillStyle = '#ffffff'
+    ctx.fillText(text, rx1 + 4, Math.max(14, ry1 - 4))
+  })
 }
 
 const updateMiniChart = () => {
@@ -910,7 +585,9 @@ onUnmounted(() => {
 <style scoped>
 .realtime-page {
   padding: 20px;
-  color: #e2e8f0;
+  color: #334155;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  min-height: 100%;
 }
 
 /* 页面头部 */
@@ -932,7 +609,7 @@ onUnmounted(() => {
 .main-title {
   font-size: 26px;
   font-weight: 700;
-  color: #f8fafc;
+  color: #1e293b;
   margin: 0;
   display: flex;
   align-items: center;
@@ -940,7 +617,7 @@ onUnmounted(() => {
 }
 
 .title-icon {
-  color: #5eead4;
+  color: #0ea5e9;
   font-size: 28px;
 }
 
@@ -961,8 +638,8 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(94, 234, 212, 0.2);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .status-dot {
@@ -1006,10 +683,12 @@ onUnmounted(() => {
 
 /* 玻璃效果 */
 .glass-effect {
-  background: rgba(30, 41, 59, 0.5);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(94, 234, 212, 0.1);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 /* 视频面板 */
@@ -1020,18 +699,18 @@ onUnmounted(() => {
 
 .video-container {
   position: relative;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+  background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
   border-radius: 12px;
   overflow: hidden;
   aspect-ratio: 4/3;
-  border: 1px solid rgba(94, 234, 212, 0.2);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 .video-element {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  transform: scaleX(-1); /* 镜像翻转 */
+  /* transform: scaleX(-1);  ← 注释掉或删掉，否则画框坐标会左右反 */
 }
 
 /* 检测覆盖层 */
@@ -1120,7 +799,7 @@ onUnmounted(() => {
 
 .confidence {
   font-size: 12px;
-  color: #94a3b8;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* 启动提示 */
@@ -1135,13 +814,13 @@ onUnmounted(() => {
 
 .hint-content {
   text-align: center;
-  color: #64748b;
+  color: #94a3b8;
 }
 
 .hint-icon {
   font-size: 48px;
   margin-bottom: 12px;
-  color: #5eead4;
+  color: #0ea5e9;
 }
 
 .hint-content p {
@@ -1162,6 +841,7 @@ onUnmounted(() => {
   font-size: 12px;
   background: rgba(15, 23, 42, 0.8);
   border: 1px solid;
+  color: #94a3b8;
 }
 
 .connection-status.connected {
@@ -1190,7 +870,7 @@ onUnmounted(() => {
   gap: 16px;
   margin-top: 16px;
   padding: 12px 16px;
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(248, 250, 252, 0.8);
   border-radius: 8px;
 }
 
@@ -1202,16 +882,16 @@ onUnmounted(() => {
 }
 
 .stat-item .el-icon {
-  color: #5eead4;
+  color: #0ea5e9;
   font-size: 16px;
 }
 
-.stat-label {
+.stat-item .stat-label {
   color: #64748b;
 }
 
-.stat-value {
-  color: #f8fafc;
+.stat-item .stat-value {
+  color: #1e293b;
   font-weight: 600;
 }
 
@@ -1306,7 +986,7 @@ onUnmounted(() => {
 .panel-title {
   font-size: 16px;
   font-weight: 600;
-  color: #f8fafc;
+  color: #1e293b;
   margin: 0;
   display: flex;
   align-items: center;
@@ -1331,9 +1011,9 @@ onUnmounted(() => {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(248, 250, 252, 0.8);
   border-radius: 10px;
-  border: 1px solid rgba(94, 234, 212, 0.1);
+  border: 1px solid rgba(148, 163, 184, 0.1);
 }
 
 .stat-card-large.full-width {
@@ -1381,11 +1061,11 @@ onUnmounted(() => {
 .stat-value {
   font-size: 22px;
   font-weight: 700;
-  color: #f8fafc;
+  color: #1e293b;
 }
 
 .stat-value.danger {
-  color: #f87171;
+  color: #ef4444;
 }
 
 .stat-label {
@@ -1497,7 +1177,7 @@ onUnmounted(() => {
 
 .log-message {
   font-size: 13px;
-  color: #e2e8f0;
+  color: #475569;
   margin: 0;
 }
 
@@ -1507,7 +1187,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 8px;
   padding: 40px 0;
-  color: #64748b;
+  color: #94a3b8;
   font-size: 13px;
 }
 
@@ -1561,5 +1241,14 @@ onUnmounted(() => {
     flex-direction: column;
     text-align: center;
   }
+}
+.overlay-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;  /* 让鼠标事件穿透到 video */
+  z-index: 10;
 }
 </style>

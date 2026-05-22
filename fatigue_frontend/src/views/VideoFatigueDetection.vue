@@ -3,7 +3,10 @@
   <div class="fatigue-detection-page">
     <!-- 顶部标题 -->
     <div class="page-header">
-      <h1>🚗 驾驶疲劳检测系统</h1>
+      <h1>
+        <el-icon class="title-icon"><VideoCamera /></el-icon>
+        视频疲劳检测
+      </h1>
       <p class="subtitle">上传驾驶视频，AI 自动分析疲劳状态</p>
     </div>
 
@@ -94,7 +97,6 @@
               ref="videoPlayer"
               controls
               :src="videoUrl"
-              crossorigin="anonymous"
               @loadedmetadata="onVideoLoaded"
           ></video>
           <div v-if="!videoLoaded" class="video-loading">
@@ -192,51 +194,47 @@
 </template>
 
 <script>
+import { uploadVideo, getVideoStatus, getVideoDetail } from '@/api'
+
 export default {
   name: 'VideoFatigueDetection',
 
   data() {
     return {
-      // 上传状态
       isDragOver: false,
       isUploading: false,
       uploadProgress: 0,
-
-      // 任务状态
       currentTask: null,
       taskDetail: null,
       pollTimer: null,
       elapsedTimer: null,
       elapsedTime: 0,
-
-      // 视频播放
       videoUrl: '',
       videoLoaded: false,
       videoDuration: 0,
-
-      // API 配置
-      apiBase: '/api', // 根据你的 context-path 调整，如 /api 或 /
     }
   },
 
   computed: {
-    // 是否疲劳（疲劳帧超过10%或后端明确标记）
     isFatigue() {
       if (!this.taskDetail) return false
-      const ratio = this.fatigueRatio
+      const ratio = parseFloat(this.fatigueRatio)
       return ratio > 10 || (this.taskDetail.fatigueFrames > 0 && ratio > 5)
     },
 
-    // 疲劳占比
     fatigueRatio() {
-      if (!this.taskDetail) return 0
+      if (!this.taskDetail) return '0.0'
+      // 优先用后端算好的 fatigueRatio，没有再自己算
+      const ratio = this.taskDetail.fatigueRatio
+      if (typeof ratio === 'number') {
+        return (ratio * 100).toFixed(1)
+      }
       const sampled = this.taskDetail.sampledFrames || 0
       const fatigue = this.taskDetail.fatigueFrames || 0
-      if (sampled === 0) return 0
+      if (sampled === 0) return '0.0'
       return ((fatigue / sampled) * 100).toFixed(1)
     },
 
-    // 解析疲劳时间段
     fatigueSegments() {
       if (!this.taskDetail || !this.taskDetail.fatigueTimestamps) return []
       try {
@@ -253,7 +251,7 @@ export default {
   },
 
   methods: {
-    // ========== 上传相关 ==========
+    // ========== 上传 ==========
     triggerFileInput() {
       if (!this.isUploading) {
         this.$refs.fileInput.click()
@@ -279,7 +277,6 @@ export default {
     },
 
     async uploadFile(file) {
-      // 校验
       if (!file.name.endsWith('.mp4')) {
         alert('仅支持 MP4 格式')
         return
@@ -288,104 +285,84 @@ export default {
       this.isUploading = true
       this.uploadProgress = 0
 
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('userId', 'test-user') // 可替换为实际用户ID
+      // 模拟进度动画
+      const progressInterval = setInterval(() => {
+        if (this.uploadProgress < 90) {
+          this.uploadProgress += Math.random() * 15
+          if (this.uploadProgress > 90) this.uploadProgress = 90
+        }
+      }, 300)
 
       try {
-        // 模拟进度（因为 axios 上传进度有时不准确）
-        const progressInterval = setInterval(() => {
-          if (this.uploadProgress < 90) {
-            this.uploadProgress += Math.random() * 15
-            if (this.uploadProgress > 90) this.uploadProgress = 90
-          }
-        }, 300)
-
-        const response = await fetch(`${this.apiBase}/video/upload`, {
-          method: 'POST',
-          body: formData
-        })
-
+        const res = await uploadVideo(file, 'test-user')
         clearInterval(progressInterval)
         this.uploadProgress = 100
 
-        const result = await response.json()
-
+        const result = res.data
         if (result.code === 200 && result.data) {
-          this.currentTask = result.data
+          const task = result.data
+          this.currentTask = {
+            videoId: task.videoId,
+            status: task.status,                 // processing
+            resultSummary: task.resultSummary || '视频已保存，正在后台分析…'
+          }
           this.startPolling()
         } else {
           alert(result.message || '上传失败')
           this.resetUpload()
         }
       } catch (error) {
+        clearInterval(progressInterval)
         console.error('上传错误:', error)
         alert('上传失败，请检查网络')
         this.resetUpload()
       }
     },
 
-    // ========== 轮询相关 ==========
+    // ========== 轮询 ==========
     startPolling() {
       this.elapsedTime = 0
       this.elapsedTimer = setInterval(() => {
         this.elapsedTime++
       }, 1000)
 
-      this.pollTask()
-      this.pollTimer = setInterval(() => {
-        this.pollTask()
-      }, 2000) // 每2秒轮询一次
-    },
+      this.pollTimer = setInterval(async () => {
+        try {
+          const res = await getVideoStatus(this.currentTask.videoId)
+          const result = res.data
+          if (result.code !== 200 || !result.data) return
 
-    async pollTask() {
-      if (!this.currentTask) return
-
-      try {
-        const res = await fetch(`${this.apiBase}/video/${this.currentTask.videoId}`)
-        const result = await res.json()
-
-        if (result.code === 200 && result.data) {
-          this.currentTask = result.data
-
-          // 如果完成或失败，获取详情并停止轮询
-          if (['completed', 'failed'].includes(result.data.status)) {
+          const task = result.data
+          if (task.status === 'completed') {
             this.clearTimers()
-            if (result.data.status === 'completed') {
-              await this.loadDetail()
-            }
+            this.currentTask.status = 'completed'
+            this.currentTask.resultSummary = task.resultSummary
+            await this.loadDetail()
+          } else if (task.status === 'failed') {
+            this.clearTimers()
+            this.currentTask.status = 'failed'
+            this.currentTask.resultSummary = task.resultSummary || '分析失败'
           }
+        } catch (e) {
+          console.error('轮询失败', e)
         }
-      } catch (error) {
-        console.error('轮询错误:', error)
-      }
+      }, 2000)
     },
 
+    // ========== 加载详情（含视频 URL） ==========
     async loadDetail() {
-      if (!this.currentTask) return
       try {
-        const res = await fetch(`${this.apiBase}/video/${this.currentTask.videoId}/detail`)
-        const result = await res.json()
-
+        const res = await getVideoDetail(this.currentTask.videoId)
+        const result = res.data
         if (result.code === 200 && result.data) {
           this.taskDetail = result.data
-
-          let path = this.taskDetail.annotatedVideoPath || this.taskDetail.videoPath
-
-          if (path) {
-            path = path.replace(/\\/g, '/')
-            // 提取 uploads/ 后面的相对路径
-            const match = path.match(/uploads\/(.+)/)
-            if (match) {
-              // 必须是 /uploads/... 这样 Vite 代理才能拦截
-              this.videoUrl = '/uploads/' + match[1]
-            }
+          // 【关键】走 Controller 接口播放视频，不再依赖静态资源映射
+          if (this.taskDetail.videoId) {
+            this.videoUrl = `http://localhost:8080/api/video/${this.taskDetail.videoId}/stream`
           }
-
-          console.log('视频URL:', this.videoUrl)  // 应该是 /uploads/videos/xxx/xxx.mp4
         }
-      } catch (error) {
-        console.error('获取详情失败:', error)
+      } catch (e) {
+        console.error('加载详情失败', e)
       }
     },
 
@@ -409,10 +386,12 @@ export default {
       this.videoUrl = ''
       this.videoLoaded = false
       this.videoDuration = 0
-      this.$refs.fileInput && (this.$refs.fileInput.value = '')
+      if (this.$refs.fileInput) {
+        this.$refs.fileInput.value = ''
+      }
     },
 
-    // ========== 视频播放相关 ==========
+    // ========== 视频播放 ==========
     onVideoLoaded() {
       this.videoLoaded = true
       if (this.$refs.videoPlayer) {
@@ -427,7 +406,7 @@ export default {
       }
     },
 
-    // ========== 工具方法 ==========
+    // ========== 工具 ==========
     formatTime(seconds) {
       if (!seconds || isNaN(seconds)) return '00:00'
       const mins = Math.floor(seconds / 60)
@@ -474,9 +453,9 @@ export default {
 .fatigue-detection-page {
   max-width: 1200px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 24px;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f5f7fa;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
   min-height: 100vh;
 }
 
@@ -486,13 +465,22 @@ export default {
 }
 
 .page-header h1 {
-  font-size: 28px;
-  color: #1a1a2e;
+  font-size: 26px;
+  color: #1e293b;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.title-icon {
+  color: #0ea5e9;
+  font-size: 28px;
 }
 
 .subtitle {
-  color: #666;
+  color: #64748b;
   font-size: 14px;
 }
 
@@ -502,18 +490,20 @@ export default {
 }
 
 .upload-zone {
-  background: white;
-  border: 2px dashed #d0d7de;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border: 2px dashed rgba(148, 163, 184, 0.25);
   border-radius: 16px;
   padding: 60px 40px;
   text-align: center;
   cursor: pointer;
   transition: all 0.3s ease;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 .upload-zone:hover, .upload-zone.drag-over {
-  border-color: #409eff;
-  background: #f0f7ff;
+  border-color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.04);
 }
 
 .upload-zone.uploading {
@@ -553,13 +543,13 @@ export default {
 
 .progress-bg {
   fill: none;
-  stroke: #e6e6e6;
+  stroke: rgba(148, 163, 184, 0.2);
   stroke-width: 8;
 }
 
 .progress-bar {
   fill: none;
-  stroke: #409eff;
+  stroke: #0ea5e9;
   stroke-width: 8;
   stroke-linecap: round;
   transition: stroke-dasharray 0.3s ease;
@@ -572,7 +562,7 @@ export default {
   transform: translate(-50%, -50%);
   font-size: 24px;
   font-weight: bold;
-  color: #409eff;
+  color: #0ea5e9;
 }
 
 .upload-status {
@@ -588,11 +578,13 @@ export default {
 }
 
 .processing-card {
-  background: white;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
   border-radius: 16px;
   padding: 50px 60px;
   text-align: center;
   box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   max-width: 500px;
   width: 100%;
 }
@@ -607,8 +599,8 @@ export default {
 .spinner {
   width: 60px;
   height: 60px;
-  border: 4px solid #f3f3f3;
-  border-top: 4px solid #409eff;
+  border: 4px solid rgba(148, 163, 184, 0.15);
+  border-top: 4px solid #0ea5e9;
   border-radius: 50%;
   animation: spin 1s linear infinite;
   position: absolute;
@@ -633,7 +625,7 @@ export default {
   width: 80px;
   height: 80px;
   border-radius: 50%;
-  background: rgba(64, 158, 255, 0.2);
+  background: rgba(14, 165, 233, 0.2);
   animation: pulse 2s ease-out infinite;
 }
 
@@ -710,11 +702,11 @@ export default {
 }
 
 .status-banner.fatigue {
-  background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
 }
 
 .status-banner.normal {
-  background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
 }
 
 .status-icon {
@@ -733,11 +725,13 @@ export default {
 
 /* 视频区域 */
 .video-section {
-  background: white;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
   padding: 20px;
   margin-bottom: 24px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.05);
 }
 
 .video-container {
@@ -818,21 +812,24 @@ export default {
 }
 
 .stat-card {
-  background: white;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
   padding: 24px;
   text-align: center;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.05);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   transition: transform 0.2s;
 }
 
 .stat-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.08);
 }
 
 .stat-card.fatigue {
-  background: linear-gradient(135deg, #fff5f5 0%, #fff 100%);
-  border: 1px solid #ffccc7;
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.9) 0%, rgba(255, 255, 255, 0.85) 100%);
+  border: 1px solid rgba(239, 68, 68, 0.2);
 }
 
 .stat-icon {
@@ -843,12 +840,12 @@ export default {
 .stat-number {
   font-size: 32px;
   font-weight: bold;
-  color: #1a1a2e;
+  color: #1e293b;
   margin-bottom: 4px;
 }
 
 .stat-card.fatigue .stat-number {
-  color: #cf1322;
+  color: #dc2626;
 }
 
 .stat-label {
@@ -858,16 +855,18 @@ export default {
 
 /* 时间段详情 */
 .segments-section {
-  background: white;
-  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  border-radius: 16px;
   padding: 24px;
   margin-bottom: 24px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  border: 1px solid rgba(148, 163, 184, 0.15);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.05);
 }
 
 .segments-section h3 {
   font-size: 16px;
-  color: #333;
+  color: #1e293b;
   margin-bottom: 16px;
 }
 
@@ -882,15 +881,15 @@ export default {
   align-items: center;
   gap: 16px;
   padding: 14px 16px;
-  background: #fff2f0;
+  background: rgba(254, 242, 242, 0.8);
   border-radius: 8px;
-  border-left: 4px solid #ff4d4f;
+  border-left: 4px solid #ef4444;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .segment-item:hover {
-  background: #ffccc7;
+  background: rgba(239, 68, 68, 0.1);
   transform: translateX(4px);
 }
 
@@ -913,7 +912,7 @@ export default {
 }
 
 .btn-play {
-  background: #ff4d4f;
+  background: #ef4444;
   color: white;
   border: none;
   padding: 6px 14px;
@@ -924,7 +923,7 @@ export default {
 }
 
 .btn-play:hover {
-  background: #cf1322;
+  background: #dc2626;
 }
 
 /* 操作按钮 */
@@ -947,14 +946,15 @@ export default {
 }
 
 .btn-primary {
-  background: #409eff;
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
   color: white;
+  font-weight: 600;
 }
 
 .btn-primary:hover {
-  background: #66b1ff;
+  background: linear-gradient(135deg, #38bdf8 0%, #0284c7 100%);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, 0.3);
+  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.3);
 }
 
 .btn-secondary {

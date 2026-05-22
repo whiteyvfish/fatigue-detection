@@ -17,13 +17,9 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:8080',  // Spring Boot后端地址
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, '/api')
-      },
-      '/uploads': {
-        target: 'http://localhost:8080/api',  // ← 加上 /api
-        changeOrigin: true,
+        target: 'http://localhost:8080',
+        changeOrigin: true
+        // 【注意】不要加 ws: true，WebSocket 已直连 8080
       }
     }
   }

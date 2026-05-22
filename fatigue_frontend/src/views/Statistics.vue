@@ -793,17 +793,17 @@ const getStatusText = (rate) => {
 
 // 表格样式
 const headerStyle = () => ({
-  background: 'rgba(30, 41, 59, 0.8)',
-  color: '#94a3b8',
+  background: 'rgba(248, 250, 252, 0.9)',
+  color: '#475569',
   fontWeight: 600,
   fontSize: '13px',
-  borderBottom: '1px solid rgba(148, 163, 184, 0.1)'
+  borderBottom: '1px solid rgba(148, 163, 184, 0.2)'
 })
 
 const cellStyle = () => ({
   background: 'transparent',
-  color: '#e2e8f0',
-  borderBottom: '1px solid rgba(148, 163, 184, 0.05)'
+  color: '#334155',
+  borderBottom: '1px solid rgba(148, 163, 184, 0.1)'
 })
 
 // 更新主图表
@@ -1071,7 +1071,9 @@ onMounted(async () => {
 <style scoped>
 .statistics-page {
   padding: 20px;
-  color: #e2e8f0;
+  color: #334155;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  min-height: 100%;
 }
 
 /* 页面头部 */
@@ -1093,7 +1095,7 @@ onMounted(async () => {
 .main-title {
   font-size: 26px;
   font-weight: 700;
-  color: #f8fafc;
+  color: #1e293b;
   margin: 0;
   display: flex;
   align-items: center;
@@ -1101,7 +1103,7 @@ onMounted(async () => {
 }
 
 .title-icon {
-  color: #5eead4;
+  color: #0ea5e9;
   font-size: 28px;
 }
 
@@ -1144,10 +1146,12 @@ onMounted(async () => {
 
 /* 玻璃效果 */
 .glass-effect {
-  background: rgba(148, 174, 217, 0.5);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(118, 236, 217, 0.88);
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(148, 163, 184, 0.15);
   border-radius: 12px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
 }
 
 /* 统计卡片 */
@@ -1165,8 +1169,8 @@ onMounted(async () => {
 
 .stat-card:hover {
   transform: translateY(-4px);
-  box-shadow: 0 12px 24px rgba(118, 236, 217, 0.88);
-  border-color: rgba(83, 231, 207, 0.2);
+  box-shadow: 0 12px 24px rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.25);
 }
 
 .card-glow {
@@ -1274,16 +1278,16 @@ onMounted(async () => {
 .stat-value {
   font-size: 32px;
   font-weight: 700;
-  color: #f8fafc;
+  color: #1e293b;
   line-height: 1;
 }
 
 .warning-text {
-  color: #fbbf24;
+  color: #f59e0b;
 }
 
 .primary-text {
-  color: #38bdf8;
+  color: #0ea5e9;
 }
 
 .stat-unit {
@@ -1403,7 +1407,7 @@ onMounted(async () => {
 .chart-title {
   font-size: 16px;
   font-weight: 600;
-  color: #f8fafc;
+  color: #1e293b;
   margin: 0;
   display: flex;
   align-items: center;
@@ -1449,7 +1453,7 @@ onMounted(async () => {
 .table-title {
   font-size: 16px;
   font-weight: 600;
-  color: #f8fafc;
+  color: #1e293b;
   margin: 0;
   display: flex;
   align-items: center;
@@ -1473,7 +1477,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: #e2e8f0;
+  color: #475569;
   font-size: 13px;
 }
 
@@ -1486,7 +1490,7 @@ onMounted(async () => {
 
 .total-count {
   font-weight: 600;
-  color: #38bdf8;
+  color: #0ea5e9;
   font-size: 14px;
 }
 
@@ -1503,7 +1507,7 @@ onMounted(async () => {
 
 .rate-text {
   font-weight: 600;
-  color: #94a3b8;
+  color: #64748b;
   min-width: 36px;
   text-align: right;
   font-size: 13px;
@@ -1521,36 +1525,21 @@ onMounted(async () => {
   border-radius: 50%;
 }
 
-.status-excellent {
-  background: #10b981;
-  box-shadow: 0 0 8px #10b981;
-}
-
-.status-good {
-  background: #38bdf8;
-  box-shadow: 0 0 8px #38bdf8;
-}
-
-.status-warning {
-  background: #f59e0b;
-  box-shadow: 0 0 8px #f59e0b;
-}
-
-.status-danger {
-  background: #ef4444;
-  box-shadow: 0 0 8px #ef4444;
-}
+.status-excellent { background: #10b981; }
+.status-good { background: #0ea5e9; }
+.status-warning { background: #f59e0b; }
+.status-danger { background: #ef4444; }
 
 .status-text {
   font-size: 12px;
   font-weight: 500;
-  color: #e2e8f0;
+  color: #475569;
 }
 
 /* 分页器 */
 :deep(.custom-pagination) {
-  --el-pagination-button-color: #94a3b8;
-  --el-pagination-hover-color: #5eead4;
+  --el-pagination-button-color: #64748b;
+  --el-pagination-hover-color: #0ea5e9;
 }
 
 :deep(.custom-pagination .el-pagination__total) {
@@ -1558,13 +1547,14 @@ onMounted(async () => {
 }
 
 :deep(.custom-pagination .el-pager li) {
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(94, 234, 212, 0.1);
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.2);
 }
 
 :deep(.custom-pagination .el-pager li.active) {
   background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
   border-color: #0ea5e9;
+  color: white;
 }
 
 /* 数字动画 */
