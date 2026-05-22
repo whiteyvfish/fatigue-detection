@@ -183,16 +183,23 @@ public class WebSocketDetectionController extends TextWebSocketHandler {
                 sendMessage(session, response);
             } else {
                 // Status unchanged: push lightweight bbox-only message every frame
+                // 【修复】轻量消息也携带统计信息，保证前端面板实时刷新
                 Map<String, Object> lightResult = new HashMap<>();
                 lightResult.put("class", currentStatus);
                 lightResult.put("isDrowsy", displayDrowsy);
                 lightResult.put("detections", result.getDetections());
+
+                Map<String, Object> sessionStatsMap = new HashMap<>();
+                sessionStatsMap.put("totalFrames", state.frameCount.get());
+                sessionStatsMap.put("drowsyFrames", state.drowsyCount.get());
+                sessionStatsMap.put("drowsyRate", String.format("%.1f%%", state.getDrowsyRate() * 100));
 
                 Map<String, Object> lightMsg = new HashMap<>();
                 lightMsg.put("type", "detection_boxes");
                 lightMsg.put("frameIndex", frameIndex);
                 lightMsg.put("timestamp", System.currentTimeMillis());
                 lightMsg.put("result", lightResult);
+                lightMsg.put("sessionStats", sessionStatsMap);   // 【新增】
 
                 sendMessage(session, lightMsg);
             }

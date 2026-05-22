@@ -275,6 +275,14 @@ const logs = ref([])
 const showWarning = ref(false)
 const fps = ref(0)
 const latency = ref(0)
+// 【新增】前端自己维护帧计数（不依赖后端 dedup）
+const frontendFrameCount = ref(0)
+
+// ==================== 2秒显示延迟状态 ====================
+const displayFatigue = ref(false)        // 是否显示"疲劳"（带2秒延迟后的显示状态）
+const fatigueStartTime = ref(null)       // 连续疲劳开始时间戳（ms）
+const isInFatigueStreak = ref(false)     // 是否处于连续疲劳序列中
+const prevDrowsyFrames = ref(0)          // 上一帧的drowsyFrames值（用于检测增量判断即时疲劳帧）
 
 let ws = null
 let stream = null
@@ -411,8 +419,18 @@ const stopDetection = () => {
   showWarning.value = false
   fps.value = 0
   latency.value = 0
+
+  // 【重置】2秒显示延迟状态变量
+  displayFatigue.value = false
+  fatigueStartTime.value = null
+  isInFatigueStreak.value = false
+  prevDrowsyFrames.value = 0
   addLog('停止监测', 'info')
+  // 【重置】前端独立计数器
+  frontendFrameCount.value = 0
 }
+
+
 
 
 const captureFrame = () => {
@@ -436,6 +454,8 @@ const captureFrame = () => {
   ctx.drawImage(video, x, y, video.videoWidth * scale, video.videoHeight * scale)
 
   const base64 = canvas.toDataURL('image/jpeg', 0.92).split(',')[1]
+
+  frontendFrameCount.value++
 
   const startTime = Date.now()
   ws.sendFrame({
@@ -463,39 +483,11 @@ const handleWsMessage = (data) => {
       addLog('WebSocket已连接', 'success')
       break
     case 'detection_result':
-      // 归一化类名（后端去重已防抖，无需额外滑动窗口）
-      const cls = (data.result.class || '').toLowerCase()
-      const mapped = {
-        resultClass: cls === 'awake' ? 'alert' : (cls === 'fatigue' ? 'drowsy' : cls),
-        confidence: data.result.confidence || 0,
-        isDrowsy: data.result.isDrowsy || false,
-        perclos: data.result.perclos,
-        blinkFreq: data.result.blinkFreq,
-        yawnFreq: data.result.yawnFreq,
-        fatigueStatus: data.result.fatigueStatus,
-        reason: data.result.reason,
-        detections: data.result.detections || []
-      }
-
-      currentResult.value = mapped
-      stats.value = data.sessionStats || { totalFrames: 0, drowsyFrames: 0 }
-      drawOverlay(mapped)
-
-      updateMiniChart()
-
-      if (stats.value.drowsyFrames > 10 &&
-          stats.value.drowsyFrames > stats.value.totalFrames * 0.5) {
-        showWarning.value = true
-      } else {
-        showWarning.value = false
-      }
+      handleDetectionData(data)
       break
     case 'detection_boxes':
-      // 轻量消息：仅刷新检测框坐标，不更改疲劳状态判断
-      if (currentResult.value && data.result) {
-        currentResult.value.detections = data.result.detections || []
-      }
-      drawOverlay(data.result)
+      // 【修复】轻量消息也更新统计，保证面板实时刷新
+      handleDetectionData(data)
       break
     case 'warning':
       addLog(data.message, 'warning')
@@ -507,8 +499,78 @@ const handleWsMessage = (data) => {
   }
 }
 
+
+// 【新增】统一处理检测数据（detection_result 和 detection_boxes 共用）
+const handleDetectionData = (data) => {
+  const result = data.result || {}
+  const cls = (result.class || '').toLowerCase()
+  // 【修复】使用前端自己的总帧数计数，而不是完全依赖后端 dedup
+  const backendStats = data.sessionStats || { totalFrames: frontendFrameCount.value, drowsyFrames: 0 }
+
+  // ==================== 即时疲劳帧检测 ====================
+  const currDrowsy = backendStats.drowsyFrames || 0
+  const hasNewDrowsyFrame = currDrowsy > prevDrowsyFrames.value
+  prevDrowsyFrames.value = currDrowsy
+
+  // ==================== 2秒显示延迟逻辑 ====================
+  if (hasNewDrowsyFrame) {
+    if (!isInFatigueStreak.value) {
+      isInFatigueStreak.value = true
+      fatigueStartTime.value = Date.now()
+    }
+    const elapsed = Date.now() - fatigueStartTime.value
+    displayFatigue.value = elapsed >= 2000
+  } else {
+    // 【修复】只有在 sustained_counter 回到0时才真正显示正常
+    // 当 cls 不是 drowsy/fatigue 时，说明 AI 端 sustained_counter 已衰减到0
+    const aiSaysAwake = cls !== 'drowsy' && cls !== 'fatigue'
+    if (aiSaysAwake) {
+      isInFatigueStreak.value = false
+      fatigueStartTime.value = null
+      displayFatigue.value = false
+    }
+    // 如果 AI 端还在 sustained_counter 衰减过程中，保持当前显示状态
+  }
+
+  // ==================== 构建显示对象 ====================
+  const displayClass = displayFatigue.value ? 'drowsy'
+      : (cls === 'unknown' || cls === '') ? 'unknown' : 'alert'
+
+  const mapped = {
+    resultClass: displayClass,
+    confidence: result.confidence || 0,
+    isDrowsy: displayFatigue.value,
+    perclos: result.perclos,
+    blinkFreq: result.blinkFreq,
+    yawnFreq: result.yawnFreq,
+    fatigueStatus: result.fatigueStatus,
+    reason: displayFatigue.value ? result.reason : 'AWAKE',
+    detections: result.detections || []
+  }
+
+  // ==================== 更新状态（每帧都更新）====================
+  currentResult.value = mapped
+  // 【修复】totalFrames 使用前端自己计数的值，drowsyFrames 使用后端的
+  stats.value = {
+    totalFrames: frontendFrameCount.value,
+    drowsyFrames: backendStats.drowsyFrames || 0
+  }
+  drawOverlay(mapped)
+  updateMiniChart()
+
+  // 警告判断
+  if (displayFatigue.value && stats.value.drowsyFrames > 10 &&
+      stats.value.drowsyFrames > stats.value.totalFrames * 0.3) {
+    showWarning.value = true
+  } else {
+    showWarning.value = false
+  }
+}
+
 const resetStats = () => {
   stats.value = { totalFrames: 0, drowsyFrames: 0 }
+  frontendFrameCount.value = 0   // 【新增】
+  prevDrowsyFrames.value = 0
   addLog('统计数据已重置', 'info')
 }
 
